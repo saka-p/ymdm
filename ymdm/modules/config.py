@@ -13,6 +13,7 @@ class MetadataConfig:
     embed_artist: bool = True
     embed_album: bool = True
     embed_track_number: bool = True
+    thumbnail_dir: str | None = None  # None = delete after embedding
 
 @dataclass
 class GeneralConfig:
@@ -49,6 +50,7 @@ class Config:
             cfg.metadata.embed_artist = m.get("embed_artist", True)
             cfg.metadata.embed_album = m.get("embed_album", True)
             cfg.metadata.embed_track_number = m.get("embed_track_number", True)
+            cfg.metadata.thumbnail_dir = m.get("thumbnail_dir", None)
         if pl := raw.get("playlists", {}).get("watched"):
             cfg.playlists = [PlaylistEntry(p["name"], p["url"]) for p in pl]
         return cfg

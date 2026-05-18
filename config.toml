@@ -9,6 +9,7 @@ embed_thumbnail = true
 embed_artist = true
 embed_album = true
 embed_track_number = true
+# thumbnail_dir = "~/Music/ymdm/.thumbnails"  # uncomment to keep thumbnails
 
 [playlists]
 # [[playlists.watched]]

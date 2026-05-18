@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/modules/downloader.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 from .config import Config, PlaylistEntry
@@ -86,3 +90,97 @@ def sync_playlist(playlist: PlaylistEntry, config: Config):
                 playlist=playlist.name,
                 file_path=str(file_path),
             )
+EOF
+
+cat > ymdm/modules/config.py << 'EOF'
+from __future__ import annotations
+import tomllib
+from pathlib import Path
+from dataclasses import dataclass, field
+
+CONFIG_DIR = Path.home() / ".config" / "ymdm"
+CONFIG_PATH = CONFIG_DIR / "config.toml"
+DB_PATH = CONFIG_DIR / "state.db"
+
+@dataclass
+class MetadataConfig:
+    embed_thumbnail: bool = True
+    embed_artist: bool = True
+    embed_album: bool = True
+    embed_track_number: bool = True
+    thumbnail_dir: str | None = None  # None = delete after embedding
+
+@dataclass
+class GeneralConfig:
+    music_dir: Path = Path.home() / "Music" / "ymdm"
+    sync_mode: str = "new_only"
+    format: str = "mp3"
+    audio_quality: str = "320"
+
+@dataclass
+class PlaylistEntry:
+    name: str
+    url: str
+
+@dataclass
+class Config:
+    general: GeneralConfig = field(default_factory=GeneralConfig)
+    metadata: MetadataConfig = field(default_factory=MetadataConfig)
+    playlists: list[PlaylistEntry] = field(default_factory=list)
+
+    @classmethod
+    def load(cls, path: Path = CONFIG_PATH) -> "Config":
+        if not path.exists():
+            return cls()
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+        cfg = cls()
+        if g := raw.get("general"):
+            cfg.general.music_dir = Path(g.get("music_dir", cfg.general.music_dir)).expanduser()
+            cfg.general.sync_mode = g.get("sync_mode", cfg.general.sync_mode)
+            cfg.general.format = g.get("format", cfg.general.format)
+            cfg.general.audio_quality = g.get("audio_quality", cfg.general.audio_quality)
+        if m := raw.get("metadata"):
+            cfg.metadata.embed_thumbnail = m.get("embed_thumbnail", True)
+            cfg.metadata.embed_artist = m.get("embed_artist", True)
+            cfg.metadata.embed_album = m.get("embed_album", True)
+            cfg.metadata.embed_track_number = m.get("embed_track_number", True)
+            cfg.metadata.thumbnail_dir = m.get("thumbnail_dir", None)
+        if pl := raw.get("playlists", {}).get("watched"):
+            cfg.playlists = [PlaylistEntry(p["name"], p["url"]) for p in pl]
+        return cfg
+
+    def ensure_dirs(self):
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self.general.music_dir.mkdir(parents=True, exist_ok=True)
+EOF
+
+cat > config.toml << 'EOF'
+[general]
+music_dir = "~/Music/ymdm"
+sync_mode = "new_only"
+format = "mp3"
+audio_quality = "320"
+
+[metadata]
+embed_thumbnail = true
+embed_artist = true
+embed_album = true
+embed_track_number = true
+# thumbnail_dir = "~/Music/ymdm/.thumbnails"  # uncomment to keep thumbnails
+
+[playlists]
+# [[playlists.watched]]
+# name = "My Playlist"
+# url = "https://music.youtube.com/playlist?list=..."
+
+[scheduler]
+enabled = false
+interval = "24h"
+
+[tui]
+theme = "dark"
+accent_color = "#7c3aed"
+EOF
+
+echo "Patch applied successfully"
