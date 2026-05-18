@@ -1,7 +1,7 @@
 import shutil
 import click
 from .modules.config import Config, CONFIG_PATH
-from .modules.state import get_connection, remove_playlist_tracks
+from .modules.state import get_connection, remove_playlist_tracks, reconcile
 from .core import sync_all
 
 
@@ -54,9 +54,13 @@ def add(name, url):
 @main.command()
 @click.argument("name")
 @click.option("--delete-files", is_flag=True, default=False,
-              help="Also delete the downloaded music files for this playlist.")
+              help="Also delete downloaded music files and clear download history for this playlist.")
 def remove(name, delete_files):
-    """Remove a playlist from your config by name."""
+    """Remove a playlist from your config by name.
+
+    Use --delete-files to also delete the music folder and clear download history,
+    so re-adding the playlist will sync it fresh.
+    """
     config_path = CONFIG_PATH
     if not config_path.exists():
         click.echo("No config file found.")
@@ -107,3 +111,19 @@ def remove(name, delete_files):
                 click.echo(f"Cleared '{name}' from download history.")
         else:
             click.echo(f"No music folder found at {music_dir}, nothing to delete.")
+
+
+@main.command()
+def rescan():
+    """Check download history against disk and remove missing entries.
+
+    Useful if you have manually deleted files and want to re-sync them.
+    Runs automatically on every sync, but can be triggered manually here.
+    """
+    conn = get_connection()
+    cleaned = reconcile(conn)
+    if cleaned:
+        click.echo(f"Removed {cleaned} missing track(s) from download history.")
+        click.echo("Run 'ymdm sync' to re-download them.")
+    else:
+        click.echo("Everything looks good — no missing files found.")

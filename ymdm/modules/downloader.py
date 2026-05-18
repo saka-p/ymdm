@@ -56,17 +56,27 @@ def sync_playlist(playlist: PlaylistEntry, config: Config):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(playlist.url, download=False)
         entries = info.get("entries", [])
+        total = len(entries)
+        downloaded = 0
+        skipped = 0
+
+        print(f"  Found {total} tracks")
 
         for i, entry in enumerate(entries, start=1):
             video_id = entry.get("id")
+            title = entry.get("title", video_id)
+
             if not video_id:
                 continue
+
             if config.general.sync_mode == "new_only" and is_downloaded(conn, video_id):
+                print(f"  [{i}/{total}] Skipping: {title}")
+                skipped += 1
                 continue
 
+            print(f"  [{i}/{total}] Downloading: {title}")
             ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
 
-            title = entry.get("title", video_id)
             file_path = output_dir / f"{title}.{config.general.format}"
 
             thumbnail_path = _find_thumbnail(output_dir / title)
@@ -91,6 +101,7 @@ def sync_playlist(playlist: PlaylistEntry, config: Config):
                 playlist=playlist.name,
                 file_path=str(file_path),
             )
+            downloaded += 1
 
-    # Clean up any leftover playlist-level images
     _cleanup_leftover_images(output_dir)
+    print(f"  Done — {downloaded} downloaded, {skipped} skipped")

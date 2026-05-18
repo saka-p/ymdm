@@ -52,3 +52,13 @@ def remove_playlist_tracks(conn: sqlite3.Connection, playlist_name: str):
     """Remove all tracks belonging to a playlist from the state DB."""
     conn.execute("DELETE FROM tracks WHERE playlist = ?", (playlist_name,))
     conn.commit()
+
+
+def reconcile(conn: sqlite3.Connection) -> int:
+    """Remove DB entries whose files no longer exist on disk. Returns count removed."""
+    rows = conn.execute("SELECT video_id, file_path FROM tracks").fetchall()
+    stale = [row["video_id"] for row in rows if row["file_path"] and not Path(row["file_path"]).exists()]
+    if stale:
+        conn.executemany("DELETE FROM tracks WHERE video_id = ?", [(vid,) for vid in stale])
+        conn.commit()
+    return len(stale)
