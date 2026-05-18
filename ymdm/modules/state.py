@@ -3,11 +3,13 @@ import sqlite3
 from pathlib import Path
 from .config import DB_PATH
 
+
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _init_db(conn)
     return conn
+
 
 def _init_db(conn: sqlite3.Connection):
     conn.executescript("""
@@ -28,10 +30,12 @@ def _init_db(conn: sqlite3.Connection):
     """)
     conn.commit()
 
+
 def is_downloaded(conn: sqlite3.Connection, video_id: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM tracks WHERE video_id = ?", (video_id,)
     ).fetchone() is not None
+
 
 def mark_downloaded(conn: sqlite3.Connection, video_id: str, title: str,
                     artist: str | None, album: str | None,
@@ -41,4 +45,10 @@ def mark_downloaded(conn: sqlite3.Connection, video_id: str, title: str,
             (video_id, title, artist, album, playlist, file_path)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (video_id, title, artist, album, playlist, file_path))
+    conn.commit()
+
+
+def remove_playlist_tracks(conn: sqlite3.Connection, playlist_name: str):
+    """Remove all tracks belonging to a playlist from the state DB."""
+    conn.execute("DELETE FROM tracks WHERE playlist = ?", (playlist_name,))
     conn.commit()
