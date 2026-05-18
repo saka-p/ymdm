@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/cli.py << 'EOF'
 import shutil
 import click
 from .modules.config import Config, CONFIG_PATH
@@ -102,3 +106,6 @@ def remove(name, delete_files):
                 click.echo(f"Deleted {music_dir}")
         else:
             click.echo(f"No music folder found at {music_dir}, nothing to delete.")
+EOF
+
+echo "Patch 3 applied successfully"
