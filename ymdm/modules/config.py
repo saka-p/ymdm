@@ -7,13 +7,15 @@ CONFIG_DIR = Path.home() / ".config" / "ymdm"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 DB_PATH = CONFIG_DIR / "state.db"
 
+
 @dataclass
 class MetadataConfig:
     embed_thumbnail: bool = True
     embed_artist: bool = True
     embed_album: bool = True
     embed_track_number: bool = True
-    thumbnail_dir: str | None = None  # None = delete after embedding
+    thumbnail_dir: str | None = None
+
 
 @dataclass
 class GeneralConfig:
@@ -22,15 +24,24 @@ class GeneralConfig:
     format: str = "mp3"
     audio_quality: str = "320"
 
+
+@dataclass
+class AuthConfig:
+    enabled: bool = False
+    browser: str | None = None
+
+
 @dataclass
 class PlaylistEntry:
     name: str
     url: str
 
+
 @dataclass
 class Config:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     metadata: MetadataConfig = field(default_factory=MetadataConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     playlists: list[PlaylistEntry] = field(default_factory=list)
 
     @classmethod
@@ -51,6 +62,9 @@ class Config:
             cfg.metadata.embed_album = m.get("embed_album", True)
             cfg.metadata.embed_track_number = m.get("embed_track_number", True)
             cfg.metadata.thumbnail_dir = m.get("thumbnail_dir", None)
+        if a := raw.get("auth"):
+            cfg.auth.enabled = a.get("enabled", False)
+            cfg.auth.browser = a.get("browser", None)
         if pl := raw.get("playlists", {}).get("watched"):
             cfg.playlists = [PlaylistEntry(p["name"], p["url"]) for p in pl]
         return cfg

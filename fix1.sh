@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/modules/downloader.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 from .config import Config, PlaylistEntry
@@ -110,3 +114,6 @@ def sync_playlist(playlist: PlaylistEntry, config: Config):
 
     _cleanup_leftover_images(output_dir)
     print(f"  Done — {downloaded} downloaded, {skipped} skipped")
+EOF
+
+echo "Fix applied successfully"
