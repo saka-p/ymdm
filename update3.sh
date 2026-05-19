@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/cli.py << 'EOF'
 import shutil
 import click
 from .modules.config import Config, CONFIG_PATH
@@ -244,3 +248,6 @@ def _pick_browser() -> str:
         if 1 <= choice <= len(SUPPORTED_BROWSERS):
             return SUPPORTED_BROWSERS[choice - 1]
         click.echo("Invalid choice, try again.")
+EOF
+
+echo "Update 3 applied successfully"
