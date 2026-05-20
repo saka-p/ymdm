@@ -353,6 +353,7 @@ class YmdmApp(App):
         Binding("d", "delete_playlist", "Delete"),
         Binding("n", "rename_playlist", "Rename"),
         Binding("r", "rescan", "Rescan"),
+        Binding("e", "open_location", "Open folder"),
         Binding("tab", "switch_panel", "Switch panel", show=False),
         Binding("ctrl+p", "command_palette", "Commands", show=False),
     ]
@@ -449,6 +450,22 @@ class YmdmApp(App):
 
     def _set_status(self, msg: str) -> None:
         self.query_one("#status-bar", Static).update(msg)
+
+    def action_open_location(self) -> None:
+        """Open the music folder for the selected playlist in the file manager."""
+        import subprocess
+        if not self.config.playlists:
+            return
+        idx = self.selected_playlist_index
+        if idx >= len(self.config.playlists):
+            return
+        pl = self.config.playlists[idx]
+        music_dir = self.config.general.music_dir / pl.name
+        if music_dir.exists():
+            subprocess.Popen(["xdg-open", str(music_dir)])
+            self._set_status(f"Opening {music_dir}")
+        else:
+            self._set_status(f"Folder not found: {music_dir} — sync first.")
 
     def action_switch_panel(self) -> None:
         if self._active_panel == "playlist":
@@ -564,13 +581,15 @@ class YmdmApp(App):
                 url = sanitize_youtube_url(url)
                 config_path = CONFIG_PATH
                 content = config_path.read_text() if config_path.exists() else ""
-                if url not in content:
+                if url in content:
+                    self._set_status(f"'{name}' is already in your config.")
+                elif any(pl.name == name for pl in self.config.playlists):
+                    self._set_status(f"A playlist named '{name}' already exists. Choose a different name.")
+                else:
                     snippet = f'\n[[playlists.watched]]\nname = "{name}"\nurl  = "{url}"\n'
                     with open(config_path, "a") as f:
                         f.write(snippet)
                     self._set_status(f"Added '{name}'.")
-                else:
-                    self._set_status(f"'{name}' is already in your config.")
                 self._refresh_playlists()
         self.push_screen(AddPlaylistScreen(), handle_result)
 

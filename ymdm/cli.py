@@ -65,6 +65,24 @@ def add(name, url):
         click.echo(f"Playlist '{name}' is already in your config.")
         return
 
+    # Check for duplicate name
+    config = Config.load()
+    if any(pl.name == name for pl in config.playlists):
+        click.echo(f"A playlist named '{name}' already exists. Use a different name or rename the existing one first.")
+        return
+
+    # Check for duplicate name
+    config = Config.load()
+    if any(pl.name == name for pl in config.playlists):
+        click.echo(f"A playlist named '{name}' already exists. Use a different name or rename the existing one first.")
+        return
+
+    # Check for duplicate name
+    config = Config.load()
+    if any(pl.name == name for pl in config.playlists):
+        click.echo(f"A playlist named '{name}' already exists. Use a different name or rename the existing one first.")
+        return
+
     snippet = f'\n[[playlists.watched]]\nname = "{name}"\nurl  = "{url}"\n'
     with open(config_path, "a") as f:
         f.write(snippet)

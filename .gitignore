@@ -8,3 +8,21 @@ build/
 .venv/
 venv/
 *.db
+
+# Dev scripts
+patch*.sh
+fix*.sh
+update*.sh
+revert*.sh
+
+# Dev scripts
+patch*.sh
+fix*.sh
+update*.sh
+revert*.sh
+
+# Dev scripts
+patch*.sh
+fix*.sh
+update*.sh
+revert*.sh
