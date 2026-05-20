@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/modules/downloader.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 from .config import Config, PlaylistEntry
@@ -61,7 +65,6 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
     """
     import yt_dlp
 
-    dev = config.dev.enabled
     conn = get_connection()
     output_dir = config.general.music_dir / playlist.name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -70,8 +73,10 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
     if hasattr(config.metadata, "thumbnail_dir") and config.metadata.thumbnail_dir:
         thumb_keep_dir = Path(config.metadata.thumbnail_dir).expanduser()
 
-    # In dev mode don't use logger so yt-dlp prints raw output
+    logger = _YdlLogger(playlist.name)
+
     ydl_opts = {
+        "logger": logger,
         "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
@@ -80,33 +85,24 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
         }],
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
         "writethumbnail": config.metadata.embed_thumbnail,
-        "quiet": not dev,
-        "no_warnings": not dev,
+        "quiet": True,
+        "no_warnings": True,
         "js_runtimes": {"node": {}},
         "remote_components": {"ejs": {"source": "github"}},
+        "ignoreerrors": True,
     }
-
-    if not dev:
-        ydl_opts["logger"] = _YdlLogger(playlist.name)
-        ydl_opts["ignoreerrors"] = True
 
     if config.auth.enabled and config.auth.browser:
         ydl_opts.update(get_ydl_cookie_opts(config.auth.browser))
 
-    logger = ydl_opts.get("logger")
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        # In dev mode let exceptions propagate fully
-        if dev:
+        try:
             info = ydl.extract_info(playlist.url, download=False)
-        else:
-            try:
-                info = ydl.extract_info(playlist.url, download=False)
-            except Exception as e:
-                msg = f"Failed to fetch playlist '{playlist.name}': {e}"
-                print(f"  Error: {msg}")
-                _log_error(msg)
-                return [msg]
+        except Exception as e:
+            msg = f"Failed to fetch playlist '{playlist.name}': {e}"
+            print(f"  Error: {msg}")
+            _log_error(msg)
+            return [msg]
 
         entries = info.get("entries", []) if info else []
         total = len(entries)
@@ -118,6 +114,7 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
 
         for i, entry in enumerate(entries, start=1):
             if entry is None:
+                msg = f"Track {i}/{total} unavailable"
                 print(f"  [{i}/{total}] Skipping unavailable track — check errors.log")
                 _log_error(f"Playlist '{playlist.name}' track {i}/{total}: unavailable (entry is None)")
                 errors += 1
@@ -139,21 +136,19 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
             predicted_path = Path(ydl.prepare_filename(entry))
             file_path = predicted_path.with_suffix(f".{config.general.format}")
 
-            if dev:
+            try:
                 ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
-            else:
-                try:
-                    ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
-                except Exception as e:
-                    msg = f"'{title}' ({video_id}): {e}"
-                    print(f"  [{i}/{total}] Error — check errors.log")
-                    _log_error(f"Playlist '{playlist.name}' track {msg}")
-                    errors += 1
-                    continue
+            except Exception as e:
+                msg = f"'{title}' ({video_id}): {e}"
+                print(f"  [{i}/{total}] Error — check errors.log")
+                _log_error(f"Playlist '{playlist.name}' track {msg}")
+                errors += 1
+                continue
 
             if not file_path.exists():
-                print(f"  [{i}/{total}] Warning — file not found after download, check errors.log")
-                _log_error(f"Playlist '{playlist.name}' track '{title}': file not found after download")
+                msg = f"'{title}': file not found after download"
+                print(f"  [{i}/{total}] Warning — check errors.log")
+                _log_error(f"Playlist '{playlist.name}' track {msg}")
                 errors += 1
                 continue
 
@@ -190,4 +185,75 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
         summary += f", {errors} error(s) — see ~/.config/ymdm/errors.log"
     print(summary)
 
-    return logger.errors if logger else []
+    return logger.errors
+EOF
+
+# Now patch the TUI to show errors in status bar
+python3 << 'PYEOF'
+path = "ymdm/tui/app.py"
+content = open(path).read()
+
+old_sync_all = '''    @work(thread=True)
+    def _do_sync_all(self) -> None:
+        self.call_from_thread(self._set_status, "Syncing all playlists...")
+        conn = get_connection()
+        cleaned = reconcile(conn)
+        if cleaned:
+            self.call_from_thread(self._set_status, f"Reconciled {cleaned} missing tracks...")
+        for pl in self.config.playlists:
+            self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
+            sync_playlist(pl, self.config)
+        self.call_from_thread(self._refresh_playlists)
+        self.call_from_thread(self._set_status, "✓ Sync complete.")
+
+    @work(thread=True)
+    def _do_sync_selected(self, idx: int) -> None:
+        if idx >= len(self.config.playlists):
+            return
+        pl = self.config.playlists[idx]
+        self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
+        sync_playlist(pl, self.config)
+        self.call_from_thread(self._refresh_playlists)
+        self.call_from_thread(self._set_status, f"✓ Done: {pl.name}")'''
+
+new_sync_all = '''    @work(thread=True)
+    def _do_sync_all(self) -> None:
+        self.call_from_thread(self._set_status, "Syncing all playlists...")
+        conn = get_connection()
+        cleaned = reconcile(conn)
+        if cleaned:
+            self.call_from_thread(self._set_status, f"Reconciled {cleaned} missing tracks...")
+        all_errors = []
+        for pl in self.config.playlists:
+            self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
+            errors = sync_playlist(pl, self.config)
+            all_errors.extend(errors)
+        self.call_from_thread(self._refresh_playlists)
+        if all_errors:
+            self.call_from_thread(self._set_status, f"⚠ Sync complete with {len(all_errors)} error(s) — see ~/.config/ymdm/errors.log")
+        else:
+            self.call_from_thread(self._set_status, "✓ Sync complete.")
+
+    @work(thread=True)
+    def _do_sync_selected(self, idx: int) -> None:
+        if idx >= len(self.config.playlists):
+            return
+        pl = self.config.playlists[idx]
+        self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
+        errors = sync_playlist(pl, self.config)
+        self.call_from_thread(self._refresh_playlists)
+        if errors:
+            self.call_from_thread(self._set_status, f"⚠ Done: {pl.name} — {len(errors)} error(s), see ~/.config/ymdm/errors.log")
+        else:
+            self.call_from_thread(self._set_status, f"✓ Done: {pl.name}")'''
+
+if old_sync_all in content:
+    content = content.replace(old_sync_all, new_sync_all)
+    open(path, "w").write(content)
+    print("TUI sync methods patched")
+else:
+    print("ERROR: could not find sync methods")
+    exit(1)
+PYEOF
+
+echo "Fix 8 applied successfully"

@@ -219,6 +219,32 @@ class AuthMenuScreen(ModalScreen):
         self.dismiss(idx)
 
 
+class DevMenuScreen(ModalScreen):
+    """Developer mode toggle modal."""
+
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="add-dialog"):
+            yield Label("Developer Mode", id="dialog-title")
+            yield Label("Disables error skipping so full tracebacks show in terminal.", id="delete-question")
+            yield ListView(id="dev-options")
+            yield Label("Enter · select   Esc · cancel", id="delete-hint")
+
+    def on_mount(self) -> None:
+        from ..modules.config import Config
+        config = Config.load()
+        status = "ON" if config.dev.enabled else "OFF"
+        lv = self.query_one("#dev-options", ListView)
+        lv.append(ListItem(Label(f"Toggle developer mode (currently {status})")))
+        lv.append(ListItem(Label("View errors.log")))
+        lv.focus()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        idx = self.query_one("#dev-options", ListView).index
+        self.dismiss(idx)
+
+
 class YmdmCommands(Provider):
     """Command palette — shows Authentication entry that opens the auth modal."""
 
@@ -226,6 +252,7 @@ class YmdmCommands(Provider):
         app = self.app
         commands = [
             ("Authentication", "Manage private playlist auth — setup, status, remove", app.action_open_auth_menu),
+            ("Developer Mode", "Toggle error skipping for debugging", app.action_open_dev_menu),
         ]
         matcher = self.matcher(query)
         for label, help_text, action in commands:
@@ -239,6 +266,12 @@ class YmdmCommands(Provider):
             "Authentication",
             self.app.action_open_auth_menu,
             help="Manage private playlist auth — setup, status, remove",
+        )
+        yield Hit(
+            0.9,
+            "Developer Mode",
+            self.app.action_open_dev_menu,
+            help="Toggle error skipping for debugging",
         )
 
 
@@ -436,28 +469,78 @@ class YmdmApp(App):
                 self.action_auth_remove()
         self.push_screen(AuthMenuScreen(), handle_result)
 
+    def action_open_dev_menu(self) -> None:
+        def handle_result(choice) -> None:
+            if choice is None:
+                return
+            from ..modules.config import Config, CONFIG_PATH
+            import subprocess
+            if choice == 0:
+                # Toggle dev mode
+                config_path = CONFIG_PATH
+                content = config_path.read_text() if config_path.exists() else ""
+                cfg = Config.load()
+                new_state = not cfg.dev.enabled
+                # Remove existing dev block
+                lines = content.splitlines(keepends=True)
+                new_lines = []
+                skip = False
+                for line in lines:
+                    if line.strip() == "[dev]":
+                        skip = True
+                        continue
+                    if skip and line.strip().startswith("[") and line.strip() != "[dev]":
+                        skip = False
+                    if not skip:
+                        new_lines.append(line)
+                new_content = "".join(new_lines).rstrip()
+                enabled_str = "true" if new_state else "false"
+                new_content += f"\n\n[dev]\nenabled = {enabled_str}\n"
+                config_path.write_text(new_content)
+                self.config = Config.load()
+                state_str = "ON" if new_state else "OFF"
+                self._set_status(f"Developer mode {state_str}. {'Full tracebacks will show on next sync.' if new_state else 'Errors will be skipped silently.'}")
+            elif choice == 1:
+                import os
+                from ..modules.downloader import ERROR_LOG
+                if ERROR_LOG.exists():
+                    os.system(f"xdg-open {ERROR_LOG} &")
+                else:
+                    self._set_status("No errors.log found yet.")
+        self.push_screen(DevMenuScreen(), handle_result)
+
     @work(thread=True)
     def _do_sync_all(self) -> None:
+        self.config = Config.load()
         self.call_from_thread(self._set_status, "Syncing all playlists...")
         conn = get_connection()
         cleaned = reconcile(conn)
         if cleaned:
             self.call_from_thread(self._set_status, f"Reconciled {cleaned} missing tracks...")
+        all_errors = []
         for pl in self.config.playlists:
             self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
-            sync_playlist(pl, self.config)
+            errors = sync_playlist(pl, self.config)
+            all_errors.extend(errors)
         self.call_from_thread(self._refresh_playlists)
-        self.call_from_thread(self._set_status, "✓ Sync complete.")
+        if all_errors:
+            self.call_from_thread(self._set_status, f"⚠ Sync complete with {len(all_errors)} error(s) — see ~/.config/ymdm/errors.log")
+        else:
+            self.call_from_thread(self._set_status, "✓ Sync complete.")
 
     @work(thread=True)
     def _do_sync_selected(self, idx: int) -> None:
+        self.config = Config.load()
         if idx >= len(self.config.playlists):
             return
         pl = self.config.playlists[idx]
         self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
-        sync_playlist(pl, self.config)
+        errors = sync_playlist(pl, self.config)
         self.call_from_thread(self._refresh_playlists)
-        self.call_from_thread(self._set_status, f"✓ Done: {pl.name}")
+        if errors:
+            self.call_from_thread(self._set_status, f"⚠ Done: {pl.name} — {len(errors)} error(s), see ~/.config/ymdm/errors.log")
+        else:
+            self.call_from_thread(self._set_status, f"✓ Done: {pl.name}")
 
     def action_sync_all(self) -> None:
         self._do_sync_all()

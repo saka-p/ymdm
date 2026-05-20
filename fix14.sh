@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/modules/downloader.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 from .config import Config, PlaylistEntry
@@ -191,3 +195,6 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
     print(summary)
 
     return logger.errors if logger else []
+EOF
+
+echo "Fix 14 applied successfully"
