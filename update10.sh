@@ -1,6 +1,9 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/tui/app.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
-import tomllib
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, ListView, ListItem, Label, Static, Input
 from textual.containers import Horizontal, Vertical
@@ -8,65 +11,10 @@ from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual import work
 from textual.command import Provider, Hit, Hits
-from textual.theme import Theme
 
 from ..modules.config import Config
 from ..modules.state import get_connection, reconcile
 from ..modules.downloader import sync_playlist
-
-
-TUI_SETTINGS_PATH = Path.home() / ".config" / "ymdm" / "tui.toml"
-
-RETRO_THEME = Theme(
-    name="retro",
-    primary="#4a7c59",
-    secondary="#6a9ab0",
-    accent="#c89b3c",
-    warning="#c89b3c",
-    error="#c0392b",
-    success="#4a7c59",
-    background="#e8e4d0",
-    surface="#d8d4c0",
-    panel="#ccc8b4",
-    dark=False,
-)
-
-BREEZE_DARK_THEME = Theme(
-    name="breeze-dark",
-    primary="#3daee9",
-    secondary="#3daee9",
-    accent="#3daee9",
-    warning="#f67400",
-    error="#da4453",
-    success="#27ae60",
-    background="#232629",
-    surface="#31363b",
-    panel="#1b1e20",
-    dark=True,
-)
-
-
-def load_tui_settings() -> dict:
-    if TUI_SETTINGS_PATH.exists():
-        with open(TUI_SETTINGS_PATH, "rb") as f:
-            try:
-                return tomllib.load(f)
-            except Exception:
-                return {}
-    return {}
-
-
-def save_tui_settings(settings: dict) -> None:
-    TUI_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
-    for key, value in settings.items():
-        if isinstance(value, str):
-            lines.append(f'{key} = "{value}"')
-        elif isinstance(value, bool):
-            lines.append(f'{key} = {"true" if value else "false"}')
-        else:
-            lines.append(f'{key} = {value}')
-    TUI_SETTINGS_PATH.write_text("\n".join(lines) + "\n")
 
 
 class AddPlaylistScreen(ModalScreen):
@@ -142,9 +90,9 @@ class DeletePlaylistScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="add-dialog"):
             yield Label(f"Delete '{self.playlist_name}'", id="dialog-title")
-            yield Label("What would you like to delete?", id="delete-question")
+            yield Label("What would you like to delete?", id="dialog-hint")
             yield ListView(id="delete-options")
-            yield Label("Enter · confirm   Esc · cancel", id="delete-hint")
+            yield Label("Enter · confirm   Esc · cancel", id="dialog-hint")
 
     def on_mount(self) -> None:
         lv = self.query_one("#delete-options", ListView)
@@ -159,6 +107,7 @@ class DeletePlaylistScreen(ModalScreen):
 
 class AuthSetupScreen(ModalScreen):
     BINDINGS = [("escape", "dismiss", "Cancel")]
+
     BROWSERS = ["firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"]
 
     def __init__(self, current_browser: str | None = None):
@@ -171,7 +120,10 @@ class AuthSetupScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="add-dialog"):
             yield Label("Auth Setup — Private Playlists", id="dialog-title")
-            yield Label("WARNING: Cookie auth may trigger Google security alerts.", id="auth-warning")
+            yield Label(
+                "⚠ WARNING: Cookie auth may trigger Google security alerts.",
+                id="auth-warning"
+            )
             yield Label("Select your browser:")
             yield ListView(id="browser-list")
             yield Label("Enter · confirm   Esc · cancel", id="dialog-hint")
@@ -190,84 +142,60 @@ class AuthSetupScreen(ModalScreen):
             self.dismiss(self.BROWSERS[idx])
 
 
-class AuthMenuScreen(ModalScreen):
-    """Dedicated auth submenu — clean, no bleed-through from other providers."""
-
-    BINDINGS = [("escape", "dismiss", "Cancel")]
-
-    OPTIONS = [
-        ("Setup", "Configure browser cookie auth for private playlists"),
-        ("Status", "Show current auth configuration"),
-        ("Remove", "Disable authentication"),
-    ]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="add-dialog"):
-            yield Label("Authentication", id="dialog-title")
-            yield Label("Private playlist manager", id="delete-question")
-            yield ListView(id="auth-options")
-            yield Label("Enter · select   Esc · cancel", id="delete-hint")
-
-    def on_mount(self) -> None:
-        lv = self.query_one("#auth-options", ListView)
-        for label, help_text in self.OPTIONS:
-            lv.append(ListItem(Label(f"{label}  —  {help_text}")))
-        lv.focus()
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = self.query_one("#auth-options", ListView).index
-        self.dismiss(idx)
-
-
 class YmdmCommands(Provider):
-    """Command palette — shows Authentication entry that opens the auth modal."""
+    """Custom command palette entries for ymdm."""
 
     async def search(self, query: str) -> Hits:
         app = self.app
         commands = [
-            ("Authentication", "Manage private playlist auth — setup, status, remove", app.action_open_auth_menu),
+            ("Auth Setup — configure private playlist access", app.action_auth_setup),
+            ("Auth Remove — disable authentication", app.action_auth_remove),
+            ("Auth Status — show current auth config", app.action_auth_status),
         ]
         matcher = self.matcher(query)
-        for label, help_text, action in commands:
+        for label, action in commands:
             score = matcher.match(label)
             if score > 0:
-                yield Hit(score, matcher.highlight(label), action, help=help_text)
-
-    async def discover(self) -> Hits:
-        yield Hit(
-            1.0,
-            "Authentication",
-            self.app.action_open_auth_menu,
-            help="Manage private playlist auth — setup, status, remove",
-        )
+                yield Hit(score, matcher.highlight(label), action, help=label)
 
 
 class YmdmApp(App):
     """ymdm TUI — YouTube Music Download Manager"""
 
-    COMMANDS = App.COMMANDS | {YmdmCommands}
+    COMMANDS = {YmdmCommands}
 
     CSS = """
-    Screen { background: $background; }
-    #main-container { height: 1fr; }
+    Screen {
+        background: $background;
+    }
+
+    #main-container {
+        height: 1fr;
+    }
 
     #playlist-panel {
         width: 35%;
         border: solid $primary;
         padding: 0 1;
     }
-    #playlist-panel:focus-within { border: solid $accent; }
+
+    #playlist-panel:focus-within {
+        border: solid $accent;
+    }
 
     #track-panel {
         width: 65%;
         border: solid $primary;
         padding: 0 1;
     }
-    #track-panel:focus-within { border: solid $accent; }
+
+    #track-panel:focus-within {
+        border: solid $accent;
+    }
 
     #panel-title {
         text-style: bold;
-        color: $primary;
+        color: $accent;
         padding: 0 0 1 0;
     }
 
@@ -278,15 +206,30 @@ class YmdmApp(App):
         color: $text-muted;
     }
 
-    ListView { background: transparent; border: none; }
-    ListItem { padding: 0 1; }
-    ListItem.--highlight { background: $accent 30%; }
-    .track-downloaded { color: $success; }
-    .track-missing { color: $text-muted; }
+    ListView {
+        background: transparent;
+        border: none;
+    }
+
+    ListItem {
+        padding: 0 1;
+    }
+
+    ListItem.--highlight {
+        background: $accent 20%;
+    }
+
+    .track-downloaded {
+        color: $success;
+    }
+
+    .track-missing {
+        color: $text-muted;
+    }
 
     #add-dialog {
         width: 60;
-        height: 20;
+        height: 18;
         border: solid $accent;
         background: $surface;
         padding: 1 2;
@@ -295,33 +238,55 @@ class YmdmApp(App):
 
     #dialog-title {
         text-style: bold;
-        color: $primary;
+        color: $accent;
         padding: 0 0 1 0;
     }
 
-    #dialog-hint { color: $text-muted; padding: 1 0 0 0; }
-    #delete-hint { color: $text-muted; padding: 1 0 0 0; }
-    #delete-question { padding: 0 0 1 0; }
-    #auth-warning { color: $error; padding: 0 0 1 0; }
+    #dialog-hint {
+        color: $text-muted;
+        padding: 1 0 0 0;
+    }
 
-    Footer { background: $background; }
-    Footer > .footer--key { background: $background; color: $primary; }
-    Footer > .footer--key:hover { background: $background; color: $primary; }
+    #auth-warning {
+        color: $warning;
+        padding: 0 0 1 0;
+    }
 
-    Input { border: solid $primary; background: $surface; margin: 0 0 1 0; }
-    Input:focus { border: solid $accent; }
+    Footer {
+        background: $background;
+    }
+
+    Footer > .footer--key {
+        background: $background;
+        color: $text-muted;
+    }
+
+    Footer > .footer--key:hover {
+        background: $background;
+        color: $text-muted;
+    }
+
+    Input {
+        border: solid $primary;
+        background: $surface;
+        margin: 0 0 1 0;
+    }
+
+    Input:focus {
+        border: solid $accent;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("b", "sync_all", "Sync all"),
-        Binding("s", "sync_selected", "Sync selected"),
+        Binding("s", "sync_all", "Sync all"),
+        Binding("enter", "sync_selected", "Sync selected"),
         Binding("a", "add_playlist", "Add"),
         Binding("d", "delete_playlist", "Delete"),
         Binding("n", "rename_playlist", "Rename"),
         Binding("r", "rescan", "Rescan"),
         Binding("tab", "switch_panel", "Switch panel", show=False),
-        Binding("ctrl+p", "command_palette", "Commands", show=False),
+        Binding("ctrl+p", "command_palette", "Commands", show=True),
     ]
 
     def __init__(self):
@@ -329,31 +294,6 @@ class YmdmApp(App):
         self.config = Config.load()
         self.selected_playlist_index = 0
         self._active_panel = "playlist"
-        self._settings = load_tui_settings()
-        self.register_theme(RETRO_THEME)
-        self.register_theme(BREEZE_DARK_THEME)
-
-    def on_mount(self) -> None:
-        saved_theme = self._settings.get("theme", "textual-dark")
-        try:
-            self.theme = saved_theme
-        except Exception:
-            self.theme = "textual-dark"
-        saved_panel = self._settings.get("active_panel", "playlist")
-        self._active_panel = saved_panel
-        self._refresh_playlists()
-        if saved_panel == "track":
-            self.query_one("#track-list", ListView).focus()
-        else:
-            self.query_one("#playlist-list", ListView).focus()
-
-    def _save_settings(self) -> None:
-        self._settings["theme"] = self.theme
-        self._settings["active_panel"] = self._active_panel
-        save_tui_settings(self._settings)
-
-    def on_unmount(self) -> None:
-        self._save_settings()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -366,6 +306,10 @@ class YmdmApp(App):
                 yield ListView(id="track-list")
         yield Static("Ready  |  Tab · switch panel  |  ^p · commands", id="status-bar")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_playlists()
+        self.query_one("#playlist-list", ListView).focus()
 
     def _refresh_playlists(self) -> None:
         self.config = Config.load()
@@ -424,17 +368,6 @@ class YmdmApp(App):
         else:
             self._active_panel = "playlist"
             self.query_one("#playlist-list", ListView).focus()
-        self._save_settings()
-
-    def action_open_auth_menu(self) -> None:
-        def handle_result(choice) -> None:
-            if choice == 0:
-                self.action_auth_setup()
-            elif choice == 1:
-                self.action_auth_status()
-            elif choice == 2:
-                self.action_auth_remove()
-        self.push_screen(AuthMenuScreen(), handle_result)
 
     @work(thread=True)
     def _do_sync_all(self) -> None:
@@ -504,15 +437,18 @@ class YmdmApp(App):
                 return
             from ..modules.config import CONFIG_PATH
             config_path = CONFIG_PATH
+            # Update config
             content = config_path.read_text()
             content = content.replace(f'name = "{pl.name}"', f'name = "{new_name}"')
             config_path.write_text(content)
+            # Update state DB
             conn = get_connection()
             conn.execute(
                 "UPDATE tracks SET playlist = ?, file_path = REPLACE(file_path, ?, ?) WHERE playlist = ?",
                 (new_name, f'/{pl.name}/', f'/{new_name}/', pl.name)
             )
             conn.commit()
+            # Rename music folder
             cfg = Config.load()
             old_dir = cfg.general.music_dir / pl.name
             new_dir = cfg.general.music_dir / new_name
@@ -538,6 +474,7 @@ class YmdmApp(App):
             from ..modules.state import remove_playlist_tracks
             import shutil
             config_path = CONFIG_PATH
+            # Remove from config
             lines = config_path.read_text().splitlines(keepends=True)
             new_lines = []
             skip = False
@@ -562,7 +499,9 @@ class YmdmApp(App):
             for item in new_lines:
                 output.append(item[1] if isinstance(item, tuple) else item)
             config_path.write_text("".join(output))
+
             if choice == 1:
+                # Also delete files and clear DB
                 cfg = Config.load()
                 music_dir = cfg.general.music_dir / pl.name
                 if music_dir.exists():
@@ -572,6 +511,7 @@ class YmdmApp(App):
                 self._set_status(f"Deleted '{pl.name}' and all music files.")
             else:
                 self._set_status(f"Removed '{pl.name}' from config.")
+
             self.selected_playlist_index = max(0, idx - 1)
             self._refresh_playlists()
 
@@ -637,3 +577,6 @@ class YmdmApp(App):
 def run():
     app = YmdmApp()
     app.run()
+EOF
+
+echo "Update 10 applied successfully"

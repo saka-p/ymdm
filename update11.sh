@@ -1,6 +1,327 @@
+#!/usr/bin/env bash
+set -e
+
+# Update CLI to support individual playlist sync
+cat > ymdm/cli.py << 'EOF'
+import shutil
+import click
+from .modules.config import Config, CONFIG_PATH
+from .modules.state import get_connection, remove_playlist_tracks, reconcile
+from .modules.auth import detect_default_browser, SUPPORTED_BROWSERS
+from .modules.utils import sanitize_youtube_url
+from .core import sync_all
+
+
+@click.group()
+def main():
+    """ymdm — YouTube Music Download Manager"""
+    pass
+
+
+@main.command()
+@click.argument("name", required=False, default=None)
+def sync(name):
+    """Sync playlists. Pass a playlist name to sync only that one."""
+    config = Config.load()
+    if name:
+        matches = [pl for pl in config.playlists if pl.name == name]
+        if not matches:
+            click.echo(f"No playlist named '{name}' found. Use 'ymdm list' to see configured playlists.")
+            return
+        from .modules.downloader import sync_playlist
+        from .modules.state import get_connection
+        from .modules.state import reconcile
+        config.ensure_dirs()
+        conn = get_connection()
+        cleaned = reconcile(conn)
+        if cleaned:
+            click.echo(f"Reconciled: removed {cleaned} missing track(s) from history")
+        click.echo(f"\nSyncing: {matches[0].name}")
+        sync_playlist(matches[0], config)
+    else:
+        sync_all(config)
+
+
+@main.command(name="list")
+def list_playlists():
+    """List configured playlists."""
+    config = Config.load()
+    if not config.playlists:
+        click.echo("No playlists configured. Use 'ymdm add' to add one.")
+        return
+    for pl in config.playlists:
+        click.echo(f"  {pl.name}  —  {pl.url}")
+
+
+@main.command()
+@click.argument("name")
+@click.argument("url")
+def add(name, url):
+    """Add a YouTube Music playlist to your config."""
+    url = sanitize_youtube_url(url)
+
+    config_path = CONFIG_PATH
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if not config_path.exists():
+        config_path.write_text("")
+
+    content = config_path.read_text()
+    if url in content:
+        click.echo(f"Playlist '{name}' is already in your config.")
+        return
+
+    snippet = f'\n[[playlists.watched]]\nname = "{name}"\nurl  = "{url}"\n'
+    with open(config_path, "a") as f:
+        f.write(snippet)
+
+    click.echo(f"Added '{name}' to {config_path}")
+    click.echo(f"URL: {url}")
+
+
+@main.command()
+@click.argument("old_name")
+@click.argument("new_name")
+def rename(old_name, new_name):
+    """Rename a playlist."""
+    config_path = CONFIG_PATH
+    if not config_path.exists():
+        click.echo("No config file found.")
+        return
+
+    config = Config.load()
+    matches = [pl for pl in config.playlists if pl.name == old_name]
+    if not matches:
+        click.echo(f"No playlist named '{old_name}' found.")
+        return
+
+    # Update config
+    content = config_path.read_text()
+    content = content.replace(f'name = "{old_name}"', f'name = "{new_name}"')
+    config_path.write_text(content)
+
+    # Update state DB
+    conn = get_connection()
+    conn.execute(
+        "UPDATE tracks SET playlist = ?, file_path = REPLACE(file_path, ?, ?) WHERE playlist = ?",
+        (new_name, f'/{old_name}/', f'/{new_name}/', old_name)
+    )
+    conn.commit()
+
+    # Rename music folder
+    from pathlib import Path
+    old_dir = config.general.music_dir / old_name
+    new_dir = config.general.music_dir / new_name
+    if old_dir.exists() and not new_dir.exists():
+        old_dir.rename(new_dir)
+
+    click.echo(f"Renamed '{old_name}' to '{new_name}'.")
+
+
+@main.command()
+@click.argument("name")
+@click.option("--delete-files", is_flag=True, default=False,
+              help="Also delete downloaded music files and clear download history for this playlist. "
+                   "Use this when you want to completely remove a playlist and re-sync it fresh later.")
+def remove(name, delete_files):
+    """Remove a playlist from your config by name.
+
+    By default, only removes the playlist from config — downloaded files are kept on disk.
+
+    Use --delete-files to also delete the music folder and clear download history,
+    so re-adding the playlist will sync it fresh.
+    """
+    config_path = CONFIG_PATH
+    if not config_path.exists():
+        click.echo("No config file found.")
+        return
+
+    config = Config.load()
+
+    lines = config_path.read_text().splitlines(keepends=True)
+    new_lines = []
+    skip = False
+
+    for line in lines:
+        if line.strip() == "[[playlists.watched]]":
+            skip = False
+            new_lines.append(("PLACEHOLDER", line))
+            continue
+        if new_lines and isinstance(new_lines[-1], tuple) and new_lines[-1][0] == "PLACEHOLDER":
+            if f'name = "{name}"' in line:
+                skip = True
+                new_lines.pop()
+                continue
+            else:
+                actual_line = new_lines.pop()[1]
+                new_lines.append(actual_line)
+        if skip and line.strip().startswith("[["):
+            skip = False
+        if not skip:
+            new_lines.append(line)
+
+    output = []
+    for item in new_lines:
+        if isinstance(item, tuple):
+            output.append(item[1])
+        else:
+            output.append(item)
+
+    config_path.write_text("".join(output))
+    click.echo(f"Removed '{name}' from config.")
+
+    if delete_files:
+        music_dir = config.general.music_dir / name
+        if music_dir.exists():
+            if click.confirm(f"Delete {music_dir} and all its contents?"):
+                shutil.rmtree(music_dir)
+                click.echo(f"Deleted {music_dir}")
+                conn = get_connection()
+                remove_playlist_tracks(conn, name)
+                click.echo(f"Cleared '{name}' from download history.")
+        else:
+            click.echo(f"No music folder found at {music_dir}, nothing to delete.")
+
+
+@main.command()
+def rescan():
+    """Check download history against disk and remove missing entries.
+
+    Useful if you have manually deleted files and want to re-sync them.
+    Runs automatically on every sync, but can be triggered manually here.
+    """
+    conn = get_connection()
+    cleaned = reconcile(conn)
+    if cleaned:
+        click.echo(f"Removed {cleaned} missing track(s) from download history.")
+        click.echo("Run 'ymdm sync' to re-download them.")
+    else:
+        click.echo("Everything looks good — no missing files found.")
+
+
+@main.group()
+def auth():
+    """Manage authentication for private playlists.
+
+    WARNING: Cookie-based auth may trigger Google security alerts.
+    Use at your own risk and only on accounts you control.
+    """
+    pass
+
+
+@auth.command(name="setup")
+def auth_setup():
+    """Set up browser cookie auth for private playlists.
+
+    \b
+    WARNING: This method reads cookies from your browser to authenticate
+    with YouTube. Google may flag this as a suspicious login attempt and
+    send a security alert to your account. This is a known limitation of
+    cookie-based authentication.
+
+    Use at your own risk. Run 'ymdm auth remove' to disable at any time.
+    """
+    click.echo("WARNING: Cookie-based auth may trigger Google security alerts.")
+    click.echo("         Your account is not at risk, but you may receive a notification.")
+    click.echo("")
+
+    if not click.confirm("Do you want to continue?", default=False):
+        click.echo("Auth setup cancelled.")
+        return
+
+    config_path = CONFIG_PATH
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    detected = detect_default_browser()
+    if detected:
+        use_detected = click.confirm(
+            f"Detected '{detected}' as your default browser. Use this?",
+            default=True
+        )
+        browser = detected if use_detected else _pick_browser()
+    else:
+        click.echo("Could not detect your default browser.")
+        browser = _pick_browser()
+
+    content = config_path.read_text() if config_path.exists() else ""
+    lines = content.splitlines(keepends=True)
+    new_lines = []
+    skip = False
+    for line in lines:
+        if line.strip() == "[auth]":
+            skip = True
+            continue
+        if skip and line.strip().startswith("[") and line.strip() != "[auth]":
+            skip = False
+        if not skip:
+            new_lines.append(line)
+
+    new_content = "".join(new_lines).rstrip()
+    new_content += f"\n\n[auth]\nenabled = true\nbrowser = \"{browser}\"\n"
+    config_path.write_text(new_content)
+
+    click.echo(f"\nAuth enabled using {browser} cookies.")
+    click.echo("Private playlists will now work on next sync.")
+
+
+@auth.command(name="status")
+def auth_status():
+    """Show current auth configuration."""
+    config = Config.load()
+    if config.auth.enabled and config.auth.browser:
+        click.echo(f"Auth enabled — using {config.auth.browser} cookies.")
+        click.echo("Note: this may trigger Google security alerts during sync.")
+    else:
+        click.echo("Auth disabled — only public playlists will sync.")
+
+
+@auth.command(name="remove")
+def auth_remove():
+    """Disable authentication."""
+    config_path = CONFIG_PATH
+    if not config_path.exists():
+        click.echo("No config file found.")
+        return
+
+    content = config_path.read_text()
+    lines = content.splitlines(keepends=True)
+    new_lines = []
+    skip = False
+
+    for line in lines:
+        if line.strip() == "[auth]":
+            skip = True
+            continue
+        if skip and line.strip().startswith("[") and line.strip() != "[auth]":
+            skip = False
+        if not skip:
+            new_lines.append(line)
+
+    config_path.write_text("".join(new_lines))
+    click.echo("Auth removed. Only public playlists will sync.")
+
+
+def _pick_browser() -> str:
+    click.echo("\nSupported browsers:")
+    for i, b in enumerate(SUPPORTED_BROWSERS, start=1):
+        click.echo(f"  {i}. {b}")
+    while True:
+        choice = click.prompt("Select a browser", type=int)
+        if 1 <= choice <= len(SUPPORTED_BROWSERS):
+            return SUPPORTED_BROWSERS[choice - 1]
+        click.echo("Invalid choice, try again.")
+
+
+@main.command()
+def tui():
+    """Launch the TUI interface."""
+    from .tui.app import run
+    run()
+EOF
+
+# Update TUI with individual sync, fixed auth menu, and retro theme
+cat > ymdm/tui/app.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
-import tomllib
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, ListView, ListItem, Label, Static, Input
 from textual.containers import Horizontal, Vertical
@@ -15,58 +336,19 @@ from ..modules.state import get_connection, reconcile
 from ..modules.downloader import sync_playlist
 
 
-TUI_SETTINGS_PATH = Path.home() / ".config" / "ymdm" / "tui.toml"
-
 RETRO_THEME = Theme(
     name="retro",
-    primary="#4a7c59",
-    secondary="#6a9ab0",
-    accent="#c89b3c",
+    primary="#4a7c59",       # dark green stripe
+    secondary="#6a9ab0",     # steel blue stripe
+    accent="#c89b3c",        # golden yellow stripe
     warning="#c89b3c",
-    error="#c0392b",
+    error="#c0392b",         # red stripe
     success="#4a7c59",
-    background="#e8e4d0",
+    background="#e8e4d0",    # cream/tan
     surface="#d8d4c0",
     panel="#ccc8b4",
     dark=False,
 )
-
-BREEZE_DARK_THEME = Theme(
-    name="breeze-dark",
-    primary="#3daee9",
-    secondary="#3daee9",
-    accent="#3daee9",
-    warning="#f67400",
-    error="#da4453",
-    success="#27ae60",
-    background="#232629",
-    surface="#31363b",
-    panel="#1b1e20",
-    dark=True,
-)
-
-
-def load_tui_settings() -> dict:
-    if TUI_SETTINGS_PATH.exists():
-        with open(TUI_SETTINGS_PATH, "rb") as f:
-            try:
-                return tomllib.load(f)
-            except Exception:
-                return {}
-    return {}
-
-
-def save_tui_settings(settings: dict) -> None:
-    TUI_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
-    for key, value in settings.items():
-        if isinstance(value, str):
-            lines.append(f'{key} = "{value}"')
-        elif isinstance(value, bool):
-            lines.append(f'{key} = {"true" if value else "false"}')
-        else:
-            lines.append(f'{key} = {value}')
-    TUI_SETTINGS_PATH.write_text("\n".join(lines) + "\n")
 
 
 class AddPlaylistScreen(ModalScreen):
@@ -159,6 +441,7 @@ class DeletePlaylistScreen(ModalScreen):
 
 class AuthSetupScreen(ModalScreen):
     BINDINGS = [("escape", "dismiss", "Cancel")]
+
     BROWSERS = ["firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"]
 
     def __init__(self, current_browser: str | None = None):
@@ -190,42 +473,32 @@ class AuthSetupScreen(ModalScreen):
             self.dismiss(self.BROWSERS[idx])
 
 
-class AuthMenuScreen(ModalScreen):
-    """Dedicated auth submenu — clean, no bleed-through from other providers."""
-
-    BINDINGS = [("escape", "dismiss", "Cancel")]
-
-    OPTIONS = [
-        ("Setup", "Configure browser cookie auth for private playlists"),
-        ("Status", "Show current auth configuration"),
-        ("Remove", "Disable authentication"),
-    ]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="add-dialog"):
-            yield Label("Authentication", id="dialog-title")
-            yield Label("Private playlist manager", id="delete-question")
-            yield ListView(id="auth-options")
-            yield Label("Enter · select   Esc · cancel", id="delete-hint")
-
-    def on_mount(self) -> None:
-        lv = self.query_one("#auth-options", ListView)
-        for label, help_text in self.OPTIONS:
-            lv.append(ListItem(Label(f"{label}  —  {help_text}")))
-        lv.focus()
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = self.query_one("#auth-options", ListView).index
-        self.dismiss(idx)
-
-
 class YmdmCommands(Provider):
-    """Command palette — shows Authentication entry that opens the auth modal."""
+    """Custom command palette entries for ymdm."""
 
     async def search(self, query: str) -> Hits:
         app = self.app
         commands = [
-            ("Authentication", "Manage private playlist auth — setup, status, remove", app.action_open_auth_menu),
+            (
+                "Authentication",
+                "Private playlist manager — setup, status, or remove auth",
+                app.action_auth_setup,
+            ),
+            (
+                "Authentication > Setup",
+                "Configure browser cookie auth for private playlists",
+                app.action_auth_setup,
+            ),
+            (
+                "Authentication > Status",
+                "Show current auth configuration",
+                app.action_auth_status,
+            ),
+            (
+                "Authentication > Remove",
+                "Disable authentication",
+                app.action_auth_remove,
+            ),
         ]
         matcher = self.matcher(query)
         for label, help_text, action in commands:
@@ -234,11 +507,13 @@ class YmdmCommands(Provider):
                 yield Hit(score, matcher.highlight(label), action, help=help_text)
 
     async def discover(self) -> Hits:
+        """Show auth commands by default without searching."""
+        app = self.app
         yield Hit(
             1.0,
             "Authentication",
-            self.app.action_open_auth_menu,
-            help="Manage private playlist auth — setup, status, remove",
+            app.action_auth_setup,
+            help="Private playlist manager — setup, status, or remove auth",
         )
 
 
@@ -248,22 +523,33 @@ class YmdmApp(App):
     COMMANDS = App.COMMANDS | {YmdmCommands}
 
     CSS = """
-    Screen { background: $background; }
-    #main-container { height: 1fr; }
+    Screen {
+        background: $background;
+    }
+
+    #main-container {
+        height: 1fr;
+    }
 
     #playlist-panel {
         width: 35%;
         border: solid $primary;
         padding: 0 1;
     }
-    #playlist-panel:focus-within { border: solid $accent; }
+
+    #playlist-panel:focus-within {
+        border: solid $accent;
+    }
 
     #track-panel {
         width: 65%;
         border: solid $primary;
         padding: 0 1;
     }
-    #track-panel:focus-within { border: solid $accent; }
+
+    #track-panel:focus-within {
+        border: solid $accent;
+    }
 
     #panel-title {
         text-style: bold;
@@ -278,11 +564,26 @@ class YmdmApp(App):
         color: $text-muted;
     }
 
-    ListView { background: transparent; border: none; }
-    ListItem { padding: 0 1; }
-    ListItem.--highlight { background: $accent 30%; }
-    .track-downloaded { color: $success; }
-    .track-missing { color: $text-muted; }
+    ListView {
+        background: transparent;
+        border: none;
+    }
+
+    ListItem {
+        padding: 0 1;
+    }
+
+    ListItem.--highlight {
+        background: $accent 30%;
+    }
+
+    .track-downloaded {
+        color: $success;
+    }
+
+    .track-missing {
+        color: $text-muted;
+    }
 
     #add-dialog {
         width: 60;
@@ -299,29 +600,60 @@ class YmdmApp(App):
         padding: 0 0 1 0;
     }
 
-    #dialog-hint { color: $text-muted; padding: 1 0 0 0; }
-    #delete-hint { color: $text-muted; padding: 1 0 0 0; }
-    #delete-question { padding: 0 0 1 0; }
-    #auth-warning { color: $error; padding: 0 0 1 0; }
+    #dialog-hint {
+        color: $text-muted;
+        padding: 1 0 0 0;
+    }
 
-    Footer { background: $background; }
-    Footer > .footer--key { background: $background; color: $primary; }
-    Footer > .footer--key:hover { background: $background; color: $primary; }
+    #delete-hint {
+        color: $text-muted;
+        padding: 1 0 0 0;
+    }
 
-    Input { border: solid $primary; background: $surface; margin: 0 0 1 0; }
-    Input:focus { border: solid $accent; }
+    #delete-question {
+        padding: 0 0 1 0;
+    }
+
+    #auth-warning {
+        color: $error;
+        padding: 0 0 1 0;
+    }
+
+    Footer {
+        background: $background;
+    }
+
+    Footer > .footer--key {
+        background: $background;
+        color: $primary;
+    }
+
+    Footer > .footer--key:hover {
+        background: $background;
+        color: $primary;
+    }
+
+    Input {
+        border: solid $primary;
+        background: $surface;
+        margin: 0 0 1 0;
+    }
+
+    Input:focus {
+        border: solid $accent;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("b", "sync_all", "Sync all"),
-        Binding("s", "sync_selected", "Sync selected"),
+        Binding("s", "sync_all", "Sync all"),
+        Binding("enter", "sync_selected", "Sync selected"),
         Binding("a", "add_playlist", "Add"),
         Binding("d", "delete_playlist", "Delete"),
         Binding("n", "rename_playlist", "Rename"),
         Binding("r", "rescan", "Rescan"),
         Binding("tab", "switch_panel", "Switch panel", show=False),
-        Binding("ctrl+p", "command_palette", "Commands", show=False),
+        Binding("ctrl+p", "command_palette", "Commands", show=True),
     ]
 
     def __init__(self):
@@ -329,31 +661,7 @@ class YmdmApp(App):
         self.config = Config.load()
         self.selected_playlist_index = 0
         self._active_panel = "playlist"
-        self._settings = load_tui_settings()
         self.register_theme(RETRO_THEME)
-        self.register_theme(BREEZE_DARK_THEME)
-
-    def on_mount(self) -> None:
-        saved_theme = self._settings.get("theme", "textual-dark")
-        try:
-            self.theme = saved_theme
-        except Exception:
-            self.theme = "textual-dark"
-        saved_panel = self._settings.get("active_panel", "playlist")
-        self._active_panel = saved_panel
-        self._refresh_playlists()
-        if saved_panel == "track":
-            self.query_one("#track-list", ListView).focus()
-        else:
-            self.query_one("#playlist-list", ListView).focus()
-
-    def _save_settings(self) -> None:
-        self._settings["theme"] = self.theme
-        self._settings["active_panel"] = self._active_panel
-        save_tui_settings(self._settings)
-
-    def on_unmount(self) -> None:
-        self._save_settings()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -366,6 +674,10 @@ class YmdmApp(App):
                 yield ListView(id="track-list")
         yield Static("Ready  |  Tab · switch panel  |  ^p · commands", id="status-bar")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_playlists()
+        self.query_one("#playlist-list", ListView).focus()
 
     def _refresh_playlists(self) -> None:
         self.config = Config.load()
@@ -424,17 +736,6 @@ class YmdmApp(App):
         else:
             self._active_panel = "playlist"
             self.query_one("#playlist-list", ListView).focus()
-        self._save_settings()
-
-    def action_open_auth_menu(self) -> None:
-        def handle_result(choice) -> None:
-            if choice == 0:
-                self.action_auth_setup()
-            elif choice == 1:
-                self.action_auth_status()
-            elif choice == 2:
-                self.action_auth_remove()
-        self.push_screen(AuthMenuScreen(), handle_result)
 
     @work(thread=True)
     def _do_sync_all(self) -> None:
@@ -562,6 +863,7 @@ class YmdmApp(App):
             for item in new_lines:
                 output.append(item[1] if isinstance(item, tuple) else item)
             config_path.write_text("".join(output))
+
             if choice == 1:
                 cfg = Config.load()
                 music_dir = cfg.general.music_dir / pl.name
@@ -572,6 +874,7 @@ class YmdmApp(App):
                 self._set_status(f"Deleted '{pl.name}' and all music files.")
             else:
                 self._set_status(f"Removed '{pl.name}' from config.")
+
             self.selected_playlist_index = max(0, idx - 1)
             self._refresh_playlists()
 
@@ -637,3 +940,6 @@ class YmdmApp(App):
 def run():
     app = YmdmApp()
     app.run()
+EOF
+
+echo "Update 11 applied successfully"

@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/tui/app.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 import tomllib
@@ -190,56 +194,36 @@ class AuthSetupScreen(ModalScreen):
             self.dismiss(self.BROWSERS[idx])
 
 
-class AuthMenuScreen(ModalScreen):
-    """Dedicated auth submenu — clean, no bleed-through from other providers."""
-
-    BINDINGS = [("escape", "dismiss", "Cancel")]
-
-    OPTIONS = [
-        ("Setup", "Configure browser cookie auth for private playlists"),
-        ("Status", "Show current auth configuration"),
-        ("Remove", "Disable authentication"),
-    ]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="add-dialog"):
-            yield Label("Authentication", id="dialog-title")
-            yield Label("Private playlist manager", id="delete-question")
-            yield ListView(id="auth-options")
-            yield Label("Enter · select   Esc · cancel", id="delete-hint")
-
-    def on_mount(self) -> None:
-        lv = self.query_one("#auth-options", ListView)
-        for label, help_text in self.OPTIONS:
-            lv.append(ListItem(Label(f"{label}  —  {help_text}")))
-        lv.focus()
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = self.query_one("#auth-options", ListView).index
-        self.dismiss(idx)
-
-
 class YmdmCommands(Provider):
-    """Command palette — shows Authentication entry that opens the auth modal."""
+    """Single provider — shows root menu or auth submenu based on app state."""
 
     async def search(self, query: str) -> Hits:
         app = self.app
-        commands = [
-            ("Authentication", "Manage private playlist auth — setup, status, remove", app.action_open_auth_menu),
-        ]
+        entries = self._auth_entries(app) if getattr(app, "_auth_menu_open", False) else self._root_entries(app)
         matcher = self.matcher(query)
-        for label, help_text, action in commands:
+        for label, help_text, action in entries:
             score = matcher.match(label)
             if score > 0:
                 yield Hit(score, matcher.highlight(label), action, help=help_text)
 
     async def discover(self) -> Hits:
-        yield Hit(
-            1.0,
-            "Authentication",
-            self.app.action_open_auth_menu,
-            help="Manage private playlist auth — setup, status, remove",
-        )
+        app = self.app
+        entries = self._auth_entries(app) if getattr(app, "_auth_menu_open", False) else self._root_entries(app)
+        for label, help_text, action in entries:
+            yield Hit(1.0, label, action, help=help_text)
+
+    def _root_entries(self, app):
+        return [
+            ("Authentication", "Manage private playlist auth — setup, status, remove", app.action_open_auth_menu),
+        ]
+
+    def _auth_entries(self, app):
+        return [
+            ("← Back", "Return to main menu", app.action_close_auth_menu),
+            ("Setup", "Configure browser cookie auth for private playlists", app.action_auth_setup),
+            ("Status", "Show current auth configuration", app.action_auth_status),
+            ("Remove", "Disable authentication", app.action_auth_remove),
+        ]
 
 
 class YmdmApp(App):
@@ -249,6 +233,7 @@ class YmdmApp(App):
 
     CSS = """
     Screen { background: $background; }
+
     #main-container { height: 1fr; }
 
     #playlist-panel {
@@ -256,6 +241,7 @@ class YmdmApp(App):
         border: solid $primary;
         padding: 0 1;
     }
+
     #playlist-panel:focus-within { border: solid $accent; }
 
     #track-panel {
@@ -263,6 +249,7 @@ class YmdmApp(App):
         border: solid $primary;
         padding: 0 1;
     }
+
     #track-panel:focus-within { border: solid $accent; }
 
     #panel-title {
@@ -281,6 +268,7 @@ class YmdmApp(App):
     ListView { background: transparent; border: none; }
     ListItem { padding: 0 1; }
     ListItem.--highlight { background: $accent 30%; }
+
     .track-downloaded { color: $success; }
     .track-missing { color: $text-muted; }
 
@@ -329,6 +317,7 @@ class YmdmApp(App):
         self.config = Config.load()
         self.selected_playlist_index = 0
         self._active_panel = "playlist"
+        self._auth_menu_open = False
         self._settings = load_tui_settings()
         self.register_theme(RETRO_THEME)
         self.register_theme(BREEZE_DARK_THEME)
@@ -427,14 +416,12 @@ class YmdmApp(App):
         self._save_settings()
 
     def action_open_auth_menu(self) -> None:
-        def handle_result(choice) -> None:
-            if choice == 0:
-                self.action_auth_setup()
-            elif choice == 1:
-                self.action_auth_status()
-            elif choice == 2:
-                self.action_auth_remove()
-        self.push_screen(AuthMenuScreen(), handle_result)
+        self._auth_menu_open = True
+        self.action_command_palette()
+
+    def action_close_auth_menu(self) -> None:
+        self._auth_menu_open = False
+        self.action_command_palette()
 
     @work(thread=True)
     def _do_sync_all(self) -> None:
@@ -578,6 +565,7 @@ class YmdmApp(App):
         self.push_screen(DeletePlaylistScreen(pl.name), handle_result)
 
     def action_auth_setup(self) -> None:
+        self._auth_menu_open = False
         current = self.config.auth.browser if self.config.auth.enabled else None
 
         def handle_result(browser) -> None:
@@ -606,6 +594,7 @@ class YmdmApp(App):
         self.push_screen(AuthSetupScreen(current), handle_result)
 
     def action_auth_remove(self) -> None:
+        self._auth_menu_open = False
         from ..modules.config import CONFIG_PATH
         config_path = CONFIG_PATH
         if not config_path.exists():
@@ -628,6 +617,7 @@ class YmdmApp(App):
         self._set_status("Auth removed — only public playlists will sync.")
 
     def action_auth_status(self) -> None:
+        self._auth_menu_open = False
         if self.config.auth.enabled and self.config.auth.browser:
             self._set_status(f"Auth enabled — using {self.config.auth.browser} cookies. ⚠ May trigger Google security alerts.")
         else:
@@ -637,3 +627,6 @@ class YmdmApp(App):
 def run():
     app = YmdmApp()
     app.run()
+EOF
+
+echo "Fix 5 applied successfully"

@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/tui/app.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 import tomllib
@@ -637,3 +641,6 @@ class YmdmApp(App):
 def run():
     app = YmdmApp()
     app.run()
+EOF
+
+echo "Fix 6 applied successfully"

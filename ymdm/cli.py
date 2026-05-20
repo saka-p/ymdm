@@ -14,10 +14,27 @@ def main():
 
 
 @main.command()
-def sync():
-    """Sync all watched playlists."""
+@click.argument("name", required=False, default=None)
+def sync(name):
+    """Sync playlists. Pass a playlist name to sync only that one."""
     config = Config.load()
-    sync_all(config)
+    if name:
+        matches = [pl for pl in config.playlists if pl.name == name]
+        if not matches:
+            click.echo(f"No playlist named '{name}' found. Use 'ymdm list' to see configured playlists.")
+            return
+        from .modules.downloader import sync_playlist
+        from .modules.state import get_connection
+        from .modules.state import reconcile
+        config.ensure_dirs()
+        conn = get_connection()
+        cleaned = reconcile(conn)
+        if cleaned:
+            click.echo(f"Reconciled: removed {cleaned} missing track(s) from history")
+        click.echo(f"\nSyncing: {matches[0].name}")
+        sync_playlist(matches[0], config)
+    else:
+        sync_all(config)
 
 
 @main.command(name="list")
@@ -54,6 +71,45 @@ def add(name, url):
 
     click.echo(f"Added '{name}' to {config_path}")
     click.echo(f"URL: {url}")
+
+
+@main.command()
+@click.argument("old_name")
+@click.argument("new_name")
+def rename(old_name, new_name):
+    """Rename a playlist."""
+    config_path = CONFIG_PATH
+    if not config_path.exists():
+        click.echo("No config file found.")
+        return
+
+    config = Config.load()
+    matches = [pl for pl in config.playlists if pl.name == old_name]
+    if not matches:
+        click.echo(f"No playlist named '{old_name}' found.")
+        return
+
+    # Update config
+    content = config_path.read_text()
+    content = content.replace(f'name = "{old_name}"', f'name = "{new_name}"')
+    config_path.write_text(content)
+
+    # Update state DB
+    conn = get_connection()
+    conn.execute(
+        "UPDATE tracks SET playlist = ?, file_path = REPLACE(file_path, ?, ?) WHERE playlist = ?",
+        (new_name, f'/{old_name}/', f'/{new_name}/', old_name)
+    )
+    conn.commit()
+
+    # Rename music folder
+    from pathlib import Path
+    old_dir = config.general.music_dir / old_name
+    new_dir = config.general.music_dir / new_name
+    if old_dir.exists() and not new_dir.exists():
+        old_dir.rename(new_dir)
+
+    click.echo(f"Renamed '{old_name}' to '{new_name}'.")
 
 
 @main.command()
@@ -248,3 +304,10 @@ def _pick_browser() -> str:
         if 1 <= choice <= len(SUPPORTED_BROWSERS):
             return SUPPORTED_BROWSERS[choice - 1]
         click.echo("Invalid choice, try again.")
+
+
+@main.command()
+def tui():
+    """Launch the TUI interface."""
+    from .tui.app import run
+    run()
