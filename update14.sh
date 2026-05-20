@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+cat > ymdm/modules/downloader.py << 'EOF'
 from __future__ import annotations
 from pathlib import Path
 from .config import Config, PlaylistEntry
@@ -26,6 +30,18 @@ def _cleanup_leftover_images(output_dir: Path):
     for f in output_dir.glob("*"):
         if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp") and f.is_file():
             f.unlink(missing_ok=True)
+
+
+class _FilenameCollector:
+    """Hooks into yt-dlp postprocessing to capture the actual output filename."""
+
+    def __init__(self):
+        self.last_filepath: str | None = None
+
+    def __call__(self, info: dict) -> None:
+        filepath = info.get("filepath")
+        if filepath:
+            self.last_filepath = filepath
 
 
 def sync_playlist(playlist: PlaylistEntry, config: Config):
@@ -81,20 +97,30 @@ def sync_playlist(playlist: PlaylistEntry, config: Config):
 
             print(f"  [{i}/{total}] Downloading: {title}")
 
-            # Ask yt-dlp what filename it will use BEFORE downloading
-            # This accounts for any character substitutions yt-dlp makes
-            predicted_path = Path(ydl.prepare_filename(entry))
-            # After FFmpegExtractAudio, extension changes to our format
-            file_path = predicted_path.with_suffix(f".{config.general.format}")
+            # Use a collector to capture the actual output path from yt-dlp
+            collector = _FilenameCollector()
+            ydl.add_post_hook(collector)
 
-            ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
-
-            if not file_path.exists():
-                print(f"  [{i}/{total}] Warning: expected file not found at {file_path.name}")
+            try:
+                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+            except Exception as e:
+                print(f"  [{i}/{total}] Error: {e}")
                 continue
 
+            # Use actual path from yt-dlp, fall back to reconstructed path
+            if collector.last_filepath:
+                file_path = Path(collector.last_filepath)
+            else:
+                # Fallback: search output_dir for a file matching the video_id or title
+                file_path = _find_downloaded_file(output_dir, title, config.general.format)
+
+            if file_path is None or not file_path.exists():
+                print(f"  [{i}/{total}] Warning: could not locate downloaded file for '{title}'")
+                continue
+
+            # Find thumbnail using the file's stem (actual filename, not title)
             thumbnail_path = _find_thumbnail(file_path.with_suffix(""))
-            if config.metadata.embed_thumbnail:
+            if config.metadata.embed_thumbnail and file_path.exists():
                 embed_metadata(
                     file_path=file_path,
                     title=title,
@@ -119,3 +145,28 @@ def sync_playlist(playlist: PlaylistEntry, config: Config):
 
     _cleanup_leftover_images(output_dir)
     print(f"  Done — {downloaded} downloaded, {skipped} skipped")
+
+
+def _find_downloaded_file(output_dir: Path, title: str, fmt: str) -> Path | None:
+    """Find a downloaded file by trying common filename patterns."""
+    # Try exact match first
+    exact = output_dir / f"{title}.{fmt}"
+    if exact.exists():
+        return exact
+
+    # Try sanitized title (yt-dlp strips certain special chars)
+    import re
+    sanitized = re.sub(r'[\\/*?:"<>|]', "_", title)
+    sanitized_path = output_dir / f"{sanitized}.{fmt}"
+    if sanitized_path.exists():
+        return sanitized_path
+
+    # Last resort: find the most recently modified mp3 in the dir
+    mp3_files = sorted(output_dir.glob(f"*.{fmt}"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if mp3_files:
+        return mp3_files[0]
+
+    return None
+EOF
+
+echo "Update 14 applied successfully"
