@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import tomllib
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, ListView, ListItem, Label, Static, Input
+from textual.widgets import Header, Footer, ListView, ListItem, Label, Static, Input, RichLog
 from textual.containers import Horizontal, Vertical
 from textual.binding import Binding
 from textual.screen import ModalScreen
@@ -35,7 +35,7 @@ BREEZE_DARK_THEME = Theme(
     name="breeze-dark",
     primary="#3daee9",
     secondary="#3daee9",
-    accent="#3daee9",
+    accent="#27ae60",
     warning="#f67400",
     error="#da4453",
     success="#27ae60",
@@ -305,10 +305,15 @@ class YmdmApp(App):
     }
 
     #status-bar {
-        height: 3;
+        height: 8;
         border: solid $primary;
         padding: 0 1;
-        color: $text-muted;
+        background: $background;
+    }
+    
+    #status-bar:focus-within {
+        border: solid $accent;
+        background: $background;
     }
 
     ListView { background: transparent; border: none; }
@@ -355,6 +360,7 @@ class YmdmApp(App):
         Binding("r", "rescan", "Rescan"),
         Binding("e", "open_location", "Open folder"),
         Binding("tab", "switch_panel", "Switch panel", show=False),
+        Binding("shift+tab", "focus_log", "Focus log", show=False),
         Binding("ctrl+p", "command_palette", "Commands", show=False),
     ]
 
@@ -380,6 +386,8 @@ class YmdmApp(App):
             self.query_one("#track-list", ListView).focus()
         else:
             self.query_one("#playlist-list", ListView).focus()
+        log = self.query_one("#status-bar", RichLog)
+        log.write("Ready  |  Tab · switch panel  |  ^p · commands")
 
     def _save_settings(self) -> None:
         self._settings["theme"] = self.theme
@@ -398,7 +406,7 @@ class YmdmApp(App):
             with Vertical(id="track-panel"):
                 yield Label("Tracks", id="panel-title")
                 yield ListView(id="track-list")
-        yield Static("Ready  |  Tab · switch panel  |  ^p · commands", id="status-bar")
+        yield RichLog(id="status-bar", highlight=False, markup=False, wrap=True)
         yield Footer()
 
     def _refresh_playlists(self) -> None:
@@ -449,7 +457,7 @@ class YmdmApp(App):
         event.prevent_default()
 
     def _set_status(self, msg: str) -> None:
-        self.query_one("#status-bar", Static).update(msg)
+        self.query_one("#status-bar", RichLog).write(msg)
 
     def action_open_location(self) -> None:
         """Open the music folder for the selected playlist in the file manager."""
@@ -475,6 +483,9 @@ class YmdmApp(App):
             self._active_panel = "playlist"
             self.query_one("#playlist-list", ListView).focus()
         self._save_settings()
+
+    def action_focus_log(self) -> None:
+        self.query_one("#status-bar", RichLog).focus()
 
     def action_open_auth_menu(self) -> None:
         def handle_result(choice) -> None:
@@ -537,7 +548,11 @@ class YmdmApp(App):
         all_errors = []
         for pl in self.config.playlists:
             self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
-            errors = sync_playlist(pl, self.config)
+            def make_cb(name):
+                def cb(msg):
+                    self.call_from_thread(self._set_status, msg.strip())
+                return cb
+            errors = sync_playlist(pl, self.config, progress_cb=make_cb(pl.name))
             all_errors.extend(errors)
         self.call_from_thread(self._refresh_playlists)
         if all_errors:
@@ -552,7 +567,9 @@ class YmdmApp(App):
             return
         pl = self.config.playlists[idx]
         self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
-        errors = sync_playlist(pl, self.config)
+        def cb(msg):
+            self.call_from_thread(self._set_status, msg.strip())
+        errors = sync_playlist(pl, self.config, progress_cb=cb)
         self.call_from_thread(self._refresh_playlists)
         if errors:
             self.call_from_thread(self._set_status, f"⚠ Done: {pl.name} — {len(errors)} error(s), see ~/.config/ymdm/errors.log")

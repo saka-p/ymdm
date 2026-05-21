@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from typing import Callable
 from .config import Config, PlaylistEntry
 from .state import get_connection, is_downloaded, mark_downloaded
 from .metadata import embed_tags
@@ -17,8 +18,6 @@ def _log_error(msg: str) -> None:
 
 
 class _YdlLogger:
-    """Captures yt-dlp error messages and writes them to the error log."""
-
     def __init__(self, playlist_name: str):
         self.playlist_name = playlist_name
         self.errors: list[str] = []
@@ -39,11 +38,22 @@ def _cleanup_leftover_images(output_dir: Path):
             f.unlink(missing_ok=True)
 
 
-def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
+def sync_playlist(
+    playlist: PlaylistEntry,
+    config: Config,
+    progress_cb: Callable[[str], None] | None = None,
+) -> list[str]:
     """Download new tracks from a YouTube Music playlist.
+    progress_cb: optional callback called with status strings during download.
     Returns a list of error messages for any failed tracks.
     """
     import yt_dlp
+
+    def _status(msg: str) -> None:
+        if progress_cb:
+            progress_cb(msg)
+        else:
+            print(msg)
 
     dev = config.dev.enabled
     conn = get_connection()
@@ -88,7 +98,7 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
                 info = ydl.extract_info(playlist.url, download=False)
             except Exception as e:
                 msg = f"Failed to fetch playlist '{playlist.name}': {e}"
-                print(f"  Error: {msg}")
+                _status(f"  Error: {msg}")
                 _log_error(msg)
                 return [msg]
 
@@ -98,12 +108,12 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
         skipped = 0
         errors = 0
 
-        print(f"  Found {total} tracks")
+        _status(f"  Found {total} tracks")
 
         for i, entry in enumerate(entries, start=1):
             if entry is None:
-                print(f"  [{i}/{total}] Skipping unavailable track — check errors.log")
-                _log_error(f"Playlist '{playlist.name}' track {i}/{total}: unavailable (entry is None)")
+                _status(f"  [{i}/{total}] Skipping unavailable track — check errors.log")
+                _log_error(f"Playlist '{playlist.name}' track {i}/{total}: unavailable")
                 errors += 1
                 continue
 
@@ -114,11 +124,11 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
                 continue
 
             if config.general.sync_mode == "new_only" and is_downloaded(conn, video_id):
-                print(f"  [{i}/{total}] Skipping: {title}")
+                _status(f"  [{i}/{total}] Skipping: {title}")
                 skipped += 1
                 continue
 
-            print(f"  [{i}/{total}] Downloading: {title}")
+            _status(f"  [{i}/{total}] Downloading: {title}")
 
             predicted_path = Path(ydl.prepare_filename(entry))
             file_path = predicted_path.with_suffix(f".{config.general.format}")
@@ -130,18 +140,18 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
                     ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
                 except Exception as e:
                     msg = f"'{title}' ({video_id}): {e}"
-                    print(f"  [{i}/{total}] Error — check errors.log")
+                    _status(f"  [{i}/{total}] Error — check errors.log")
                     _log_error(f"Playlist '{playlist.name}' track {msg}")
                     errors += 1
                     continue
 
             if not file_path.exists():
-                print(f"  [{i}/{total}] Warning — file not found after download, check errors.log")
+                _status(f"  [{i}/{total}] Warning — file not found, check errors.log")
                 _log_error(f"Playlist '{playlist.name}' track '{title}': file not found after download")
                 errors += 1
                 continue
 
-            # Embed artist, album, track number tags (thumbnail already embedded by yt-dlp)
+            _status(f"  [{i}/{total}] Tagging: {title}")
             try:
                 embed_tags(
                     file_path=file_path,
@@ -168,6 +178,6 @@ def sync_playlist(playlist: PlaylistEntry, config: Config) -> list[str]:
     summary = f"  Done — {downloaded} downloaded, {skipped} skipped"
     if errors:
         summary += f", {errors} error(s) — see ~/.config/ymdm/errors.log"
-    print(summary)
+    _status(summary)
 
     return logger.errors if logger else []
