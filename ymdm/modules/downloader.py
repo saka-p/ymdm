@@ -123,7 +123,7 @@ def sync_playlist(
             if not video_id:
                 continue
 
-            if config.general.sync_mode == "new_only" and is_downloaded(conn, video_id):
+            if config.general.sync_mode == "new_only" and is_downloaded(conn, video_id, playlist.name):
                 _status(f"  [{i}/{total}] Skipping: {title}")
                 skipped += 1
                 continue
