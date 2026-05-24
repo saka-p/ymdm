@@ -128,10 +128,32 @@ def sync_playlist(
                 skipped += 1
                 continue
 
-            _status(f"  [{i}/{total}] Downloading: {title}")
-
             predicted_path = Path(ydl.prepare_filename(entry))
             file_path = predicted_path.with_suffix(f".{config.general.format}")
+
+            # Skip if file already exists on disk (e.g. imported via rescan)
+            if file_path.exists():
+                _status(f"  [{i}/{total}] Skipping (file exists): {title}")
+                if not is_downloaded(conn, video_id, playlist.name):
+                    # Remove any fake/local entry for this file first
+                    conn.execute(
+                        "DELETE FROM tracks WHERE file_path = ? AND video_id LIKE 'local_%'",
+                        (str(file_path),)
+                    )
+                    conn.commit()
+                    mark_downloaded(
+                        conn,
+                        video_id=video_id,
+                        title=title,
+                        artist=entry.get("artist") or entry.get("uploader"),
+                        album=entry.get("album") or playlist.name,
+                        playlist=playlist.name,
+                        file_path=str(file_path),
+                    )
+                skipped += 1
+                continue
+
+            _status(f"  [{i}/{total}] Downloading: {title}")
 
             if dev:
                 ydl.download([f"https://music.youtube.com/watch?v={video_id}"])

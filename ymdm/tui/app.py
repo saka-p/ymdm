@@ -245,6 +245,36 @@ class DevMenuScreen(ModalScreen):
         self.dismiss(idx)
 
 
+class SetDirectoryScreen(ModalScreen):
+    """Modal for setting the music download directory."""
+
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="add-dialog"):
+            yield Label("Set Download Directory", id="dialog-title")
+            yield Label("Current directory:", id="delete-question")
+            yield Label("", id="current-dir")
+            yield Input(placeholder="~/Music/ymdm", id="dir-input")
+            yield Label("Enter · confirm   Esc · cancel", id="dialog-hint")
+
+    def on_mount(self) -> None:
+        from ..modules.config import Config
+        cfg = Config.load()
+        self.query_one("#current-dir", Label).update(str(cfg.general.music_dir))
+        inp = self.query_one("#dir-input", Input)
+        inp.value = str(cfg.general.music_dir)
+        inp.focus()
+        inp.cursor_position = len(inp.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        path = event.value.strip()
+        if path:
+            self.dismiss(path)
+        else:
+            self.dismiss(None)
+
+
 class YmdmCommands(Provider):
     """Command palette — shows Authentication entry that opens the auth modal."""
 
@@ -272,6 +302,12 @@ class YmdmCommands(Provider):
             "Developer Mode",
             self.app.action_open_dev_menu,
             help="Toggle error skipping for debugging",
+        )
+        yield Hit(
+            0.8,
+            "Set Download Directory",
+            self.app.action_set_directory,
+            help="Change where music files are saved",
         )
 
 
@@ -537,14 +573,42 @@ class YmdmApp(App):
                     self._set_status("No errors.log found yet.")
         self.push_screen(DevMenuScreen(), handle_result)
 
+    def action_set_directory(self) -> None:
+        def handle_result(new_path) -> None:
+            if not new_path:
+                return
+            from ..modules.config import CONFIG_PATH
+            from pathlib import Path
+            config_path = CONFIG_PATH
+            content = config_path.read_text() if config_path.exists() else ""
+            lines = content.splitlines(keepends=True)
+            new_lines = []
+            for line in lines:
+                if line.strip().startswith("music_dir"):
+                    new_lines.append(f'music_dir = "{new_path}"\n')
+                else:
+                    new_lines.append(line)
+            config_path.write_text("".join(new_lines))
+            expanded = str(Path(new_path).expanduser())
+            Path(expanded).mkdir(parents=True, exist_ok=True)
+            conn = get_connection()
+            from ..modules.state import update_music_dir_paths
+            old_dir = str(self.config.general.music_dir)
+            updated = update_music_dir_paths(conn, old_dir, expanded)
+            self.config = Config.load()
+            rows = conn.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL").fetchall()
+            found = sum(1 for r in rows if r["file_path"] and Path(r["file_path"]).exists())
+            missing = len(rows) - found
+            msg = f"Directory set to: {new_path} | ✓ {found} found"
+            if missing:
+                msg += f", ✗ {missing} missing — press r to rescan"
+            self._set_status(msg) 
+        self.push_screen(SetDirectoryScreen(), handle_result)
+
     @work(thread=True)
     def _do_sync_all(self) -> None:
         self.config = Config.load()
         self.call_from_thread(self._set_status, "Syncing all playlists...")
-        conn = get_connection()
-        cleaned = reconcile(conn)
-        if cleaned:
-            self.call_from_thread(self._set_status, f"Reconciled {cleaned} missing tracks...")
         all_errors = []
         for pl in self.config.playlists:
             self.call_from_thread(self._set_status, f"Syncing: {pl.name}")
@@ -583,10 +647,17 @@ class YmdmApp(App):
         self._do_sync_selected(self.selected_playlist_index)
 
     def action_rescan(self) -> None:
+        from ..modules.state import import_existing_files
         conn = get_connection()
+        imported = import_existing_files(conn, self.config.general.music_dir)
         cleaned = reconcile(conn)
         self._refresh_playlists()
-        msg = f"Rescan complete — {cleaned} missing track(s) removed." if cleaned else "Rescan complete — everything looks good."
+        parts = []
+        if imported:
+            parts.append(f"{imported} file(s) imported")
+        if cleaned:
+            parts.append(f"{cleaned} missing track(s) removed")
+        msg = "Rescan complete — " + ", ".join(parts) if parts else "Rescan complete — everything looks good."
         self._set_status(msg)
 
     def action_add_playlist(self) -> None:
