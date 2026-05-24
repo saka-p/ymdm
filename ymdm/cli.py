@@ -14,10 +14,21 @@ def main():
 
 
 @main.command()
-def sync():
-    """Sync all watched playlists."""
+@click.argument("name", required=False, default=None)
+def sync(name):
+    """Sync playlists. Pass a playlist name to sync only that one."""
     config = Config.load()
-    sync_all(config)
+    if name:
+        matches = [pl for pl in config.playlists if pl.name == name]
+        if not matches:
+            click.echo(f"No playlist named '{name}' found. Use 'ymdm list' to see configured playlists.")
+            return
+        from .modules.downloader import sync_playlist
+        config.ensure_dirs()
+        click.echo(f"\nSyncing: {matches[0].name}")
+        sync_playlist(matches[0], config)
+    else:
+        sync_all(config)
 
 
 @main.command(name="list")
@@ -48,6 +59,11 @@ def add(name, url):
         click.echo(f"Playlist '{name}' is already in your config.")
         return
 
+    config = Config.load()
+    if any(pl.name == name for pl in config.playlists):
+        click.echo(f"A playlist named '{name}' already exists. Use a different name or rename the existing one first.")
+        return
+
     snippet = f'\n[[playlists.watched]]\nname = "{name}"\nurl  = "{url}"\n'
     with open(config_path, "a") as f:
         f.write(snippet)
@@ -57,10 +73,45 @@ def add(name, url):
 
 
 @main.command()
+@click.argument("old_name")
+@click.argument("new_name")
+def rename(old_name, new_name):
+    """Rename a playlist."""
+    config_path = CONFIG_PATH
+    if not config_path.exists():
+        click.echo("No config file found.")
+        return
+
+    config = Config.load()
+    matches = [pl for pl in config.playlists if pl.name == old_name]
+    if not matches:
+        click.echo(f"No playlist named '{old_name}' found.")
+        return
+
+    content = config_path.read_text()
+    content = content.replace(f'name = "{old_name}"', f'name = "{new_name}"')
+    config_path.write_text(content)
+
+    conn = get_connection()
+    conn.execute(
+        "UPDATE tracks SET playlist = ?, file_path = REPLACE(file_path, ?, ?) WHERE playlist = ?",
+        (new_name, f'/{old_name}/', f'/{new_name}/', old_name)
+    )
+    conn.commit()
+
+    from pathlib import Path
+    old_dir = config.general.music_dir / old_name
+    new_dir = config.general.music_dir / new_name
+    if old_dir.exists() and not new_dir.exists():
+        old_dir.rename(new_dir)
+
+    click.echo(f"Renamed '{old_name}' to '{new_name}'.")
+
+
+@main.command()
 @click.argument("name")
 @click.option("--delete-files", is_flag=True, default=False,
-              help="Also delete downloaded music files and clear download history for this playlist. "
-                   "Use this when you want to completely remove a playlist and re-sync it fresh later.")
+              help="Also delete downloaded music files and clear download history for this playlist.")
 def remove(name, delete_files):
     """Remove a playlist from your config by name.
 
@@ -123,18 +174,65 @@ def remove(name, delete_files):
 
 @main.command()
 def rescan():
-    """Check download history against disk and remove missing entries.
+    """Scan music directory and sync download history with what's on disk.
 
-    Useful if you have manually deleted files and want to re-sync them.
-    Runs automatically on every sync, but can be triggered manually here.
+    Imports any MP3s found in the music folder that aren't in the download
+    history, and removes entries for files that no longer exist.
     """
+    from .modules.state import import_existing_files
+    config = Config.load()
     conn = get_connection()
+    # First import any existing files not in DB
+    imported = import_existing_files(conn, config.general.music_dir)
+    if imported:
+        click.echo(f"Imported {imported} existing file(s) into download history.")
+    # Then remove entries for missing files
     cleaned = reconcile(conn)
     if cleaned:
         click.echo(f"Removed {cleaned} missing track(s) from download history.")
-        click.echo("Run 'ymdm sync' to re-download them.")
-    else:
-        click.echo("Everything looks good — no missing files found.")
+    if not imported and not cleaned:
+        click.echo("Everything looks good — no changes needed.")
+
+
+@main.command(name="set-dir")
+@click.argument("path")
+def set_directory(path):
+    """Set the music download directory and update file path records."""
+    from pathlib import Path
+    from .modules.state import update_music_dir_paths
+    config_path = CONFIG_PATH
+    if not config_path.exists():
+        click.echo("No config file found.")
+        return
+    old_config = Config.load()
+    old_dir = str(old_config.general.music_dir)
+    lines = config_path.read_text().splitlines(keepends=True)
+    new_lines = []
+    found = False
+    for line in lines:
+        if line.strip().startswith("music_dir"):
+            new_lines.append(f'music_dir = "{path}"\n')
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        click.echo("Could not find music_dir in config.")
+        return
+    config_path.write_text("".join(new_lines))
+    new_path = Path(path).expanduser()
+    new_path.mkdir(parents=True, exist_ok=True)
+    conn = get_connection()
+    updated = update_music_dir_paths(conn, old_dir, str(new_path))
+    click.echo(f"Download directory set to: {path}")
+    if updated:
+        click.echo(f"Updated {updated} file path(s) in download history.")
+    # Verify files exist at new location
+    rows = conn.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL").fetchall()
+    found = sum(1 for r in rows if r["file_path"] and Path(r["file_path"]).exists())
+    missing = len(rows) - found
+    click.echo(f"Checking files... ✓ {found} found, ✗ {missing} missing")
+    if missing:
+        click.echo("Run 'ymdm rescan' to remove missing entries, then 'ymdm sync' to re-download them.")
 
 
 @main.group()
@@ -248,3 +346,10 @@ def _pick_browser() -> str:
         if 1 <= choice <= len(SUPPORTED_BROWSERS):
             return SUPPORTED_BROWSERS[choice - 1]
         click.echo("Invalid choice, try again.")
+
+
+@main.command()
+def tui():
+    """Launch the TUI interface."""
+    from .tui.app import run
+    run()
