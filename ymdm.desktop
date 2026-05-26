@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=ymdm
+GenericName=Music Download Manager
+Comment=YouTube Music Download Manager
+Exec=ymdm-gtk
+Icon=audio-x-generic
+Terminal=false
+Type=Application
+Categories=Audio;Music;Network;
+Keywords=youtube;music;download;playlist;
+StartupNotify=true

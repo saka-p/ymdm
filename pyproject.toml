@@ -17,8 +17,12 @@ dependencies = [
 ]
 
 [project.scripts]
+ymdm-gtk = "ymdm.gtk.main:run"
 ymdm = "ymdm.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ymdm*"]
+
+[project.optional-dependencies]
+desktop = ["pygobject>=3.48.0"]
