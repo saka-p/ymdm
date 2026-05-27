@@ -31,7 +31,11 @@ def _init_db(conn: sqlite3.Connection):
     conn.commit()
 
 
-def is_downloaded(conn: sqlite3.Connection, video_id: str) -> bool:
+def is_downloaded(conn: sqlite3.Connection, video_id: str, playlist: str | None = None) -> bool:
+    if playlist:
+        return conn.execute(
+            "SELECT 1 FROM tracks WHERE video_id = ? AND playlist = ?", (video_id, playlist)
+        ).fetchone() is not None
     return conn.execute(
         "SELECT 1 FROM tracks WHERE video_id = ?", (video_id,)
     ).fetchone() is not None

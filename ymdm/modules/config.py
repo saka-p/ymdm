@@ -32,6 +32,11 @@ class AuthConfig:
 
 
 @dataclass
+class DevConfig:
+    enabled: bool = False  # When True, disables ignoreerrors so full tracebacks show
+
+
+@dataclass
 class PlaylistEntry:
     name: str
     url: str
@@ -42,6 +47,7 @@ class Config:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     metadata: MetadataConfig = field(default_factory=MetadataConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    dev: DevConfig = field(default_factory=DevConfig)
     playlists: list[PlaylistEntry] = field(default_factory=list)
 
     @classmethod
@@ -65,6 +71,8 @@ class Config:
         if a := raw.get("auth"):
             cfg.auth.enabled = a.get("enabled", False)
             cfg.auth.browser = a.get("browser", None)
+        if d := raw.get("dev"):
+            cfg.dev.enabled = d.get("enabled", False)
         if pl := raw.get("playlists", {}).get("watched"):
             cfg.playlists = [PlaylistEntry(p["name"], p["url"]) for p in pl]
         return cfg

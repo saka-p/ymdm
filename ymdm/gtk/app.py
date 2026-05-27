@@ -18,24 +18,112 @@ from .dialogs import (
 )
 
 
-CSS = b"""
-.sidebar-row { padding: 4px 8px; }
-.track-title { font-size: 13px; }
-.track-artist { font-size: 11px; opacity: 0.6; }
-.track-missing { opacity: 0.4; }
-.status-ok { color: #27ae60; }
-.status-missing { color: #888; }
-.log-view { font-family: monospace; font-size: 12px; }
+CSS = """
+.sidebar-list {
+    background: transparent;
+}
+.sidebar-list > row {
+    border-radius: 6px;
+    margin: 1px 6px;
+    padding: 2px 0;
+}
+.sidebar-list > row:selected {
+    background-color: alpha(@accent_color, 0.18);
+}
+.sidebar-list > row:selected .playlist-name {
+    color: @accent_color;
+    font-weight: bold;
+}
+.sidebar-list > row:hover:not(:selected) {
+    background-color: alpha(@window_fg_color, 0.06);
+}
+.playlist-name {
+    font-size: 13px;
+}
+.playlist-count {
+    font-size: 11px;
+    color: alpha(@window_fg_color, 0.5);
+    background-color: alpha(@window_fg_color, 0.08);
+    border-radius: 10px;
+    padding: 1px 7px;
+}
+.sidebar-list > row:selected .playlist-count {
+    color: @accent_color;
+    background-color: alpha(@accent_color, 0.18);
+}
+.section-label {
+    font-size: 10px;
+    font-weight: bold;
+    color: alpha(@window_fg_color, 0.4);
+}
+.track-header-label {
+    font-size: 11px;
+    font-weight: bold;
+    color: alpha(@window_fg_color, 0.45);
+}
+.track-list {
+    background: transparent;
+}
+.track-list > row {
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+}
+.track-list > row:hover {
+    background-color: alpha(@window_fg_color, 0.04);
+}
+.track-list > row:selected {
+    background-color: alpha(@accent_color, 0.12);
+}
+.track-list > row:selected .track-title {
+    color: @accent_color;
+    font-weight: bold;
+}
+.track-list > row:selected .track-num {
+    color: @accent_color;
+}
+.track-num {
+    font-size: 12px;
+    color: alpha(@window_fg_color, 0.3);
+}
+.track-title {
+    font-size: 13px;
+}
+.track-artist {
+    font-size: 11px;
+    color: alpha(@window_fg_color, 0.5);
+}
+.track-album {
+    font-size: 12px;
+    color: alpha(@window_fg_color, 0.4);
+}
+.track-missing {
+    opacity: 0.4;
+}
+.status-ok {
+    color: @success_color;
+}
+.status-missing {
+    color: alpha(@window_fg_color, 0.3);
+}
+.statusbar {
+    border-top: 1px solid alpha(@window_fg_color, 0.1);
+    padding: 5px 12px;
+}
+.statusbar-label {
+    font-size: 11px;
+    color: alpha(@window_fg_color, 0.5);
+}
 """
 
 
 class YmdmWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="ymdm")
-        self.set_default_size(900, 580)
+        self.set_default_size(940, 600)
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
+        provider.load_from_data(CSS.encode("utf-8"))
         Gtk.StyleContext.add_provider_for_display(
             self.get_display(), provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
@@ -43,35 +131,24 @@ class YmdmWindow(Adw.ApplicationWindow):
 
         self.config = Config.load()
         self._selected_index = 0
-
         self._build_ui()
         self._refresh_playlists()
 
-    # ------------------------------------------------------------------
-    # UI construction
-    # ------------------------------------------------------------------
-
     def _build_ui(self):
-        # Root toolbar view
         root_tv = Adw.ToolbarView()
 
-        # Header bar
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="ymdm", subtitle="YouTube Music Download Manager"))
-
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name("open-menu-symbolic")
         menu_btn.set_menu_model(self._build_menu())
         header.pack_end(menu_btn)
-
         root_tv.add_top_bar(header)
 
-        # Main split: sidebar + content
         self._split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self._split.set_position(240)
         self._split.set_shrink_start_child(False)
         self._split.set_shrink_end_child(False)
-
         self._split.set_start_child(self._build_sidebar())
         self._split.set_end_child(self._build_main())
 
@@ -80,10 +157,9 @@ class YmdmWindow(Adw.ApplicationWindow):
 
     def _build_menu(self) -> Gio.Menu:
         menu = Gio.Menu()
-        menu.append("Authentication", "win.auth")
         menu.append("Set download directory", "win.set_dir")
+        menu.append("Authentication", "win.auth")
         menu.append("About ymdm", "win.about")
-
         self._add_action("auth", self._on_auth)
         self._add_action("set_dir", self._on_set_dir)
         self._add_action("about", self._on_about)
@@ -95,102 +171,84 @@ class YmdmWindow(Adw.ApplicationWindow):
         self.add_action(action)
 
     def _build_sidebar(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.set_size_request(200, -1)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.set_size_request(210, -1)
 
-        # Playlist list
+        section_lbl = Gtk.Label(label="PLAYLISTS", xalign=0)
+        section_lbl.add_css_class("section-label")
+        section_lbl.set_margin_start(14)
+        section_lbl.set_margin_end(14)
+        section_lbl.set_margin_top(12)
+        section_lbl.set_margin_bottom(6)
+        outer.append(section_lbl)
+
         sw = Gtk.ScrolledWindow(vexpand=True)
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self._playlist_list = Gtk.ListBox()
         self._playlist_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._playlist_list.add_css_class("navigation-sidebar")
+        self._playlist_list.add_css_class("sidebar-list")
         self._playlist_list.connect("row-selected", self._on_playlist_selected)
         sw.set_child(self._playlist_list)
-        box.append(sw)
+        outer.append(sw)
 
-        # Sidebar action buttons
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        box.append(sep)
+        outer.append(sep)
 
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        btn_box.set_margin_top(6)
-        btn_box.set_margin_bottom(6)
-        btn_box.set_margin_start(8)
-        btn_box.set_margin_end(8)
+        action_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        action_bar.set_margin_top(5)
+        action_bar.set_margin_bottom(5)
+        action_bar.set_margin_start(6)
+        action_bar.set_margin_end(6)
 
         add_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add playlist")
         add_btn.add_css_class("flat")
         add_btn.connect("clicked", lambda _: self._on_add_playlist())
-        btn_box.append(add_btn)
+        action_bar.append(add_btn)
 
         self._rename_btn = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text="Rename playlist")
         self._rename_btn.add_css_class("flat")
         self._rename_btn.set_sensitive(False)
         self._rename_btn.connect("clicked", lambda _: self._on_rename_playlist())
-        btn_box.append(self._rename_btn)
+        action_bar.append(self._rename_btn)
 
         self._delete_btn = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Delete playlist")
         self._delete_btn.add_css_class("flat")
         self._delete_btn.set_sensitive(False)
         self._delete_btn.connect("clicked", lambda _: self._on_delete_playlist())
-        btn_box.append(self._delete_btn)
+        action_bar.append(self._delete_btn)
 
-        box.append(btn_box)
-        return box
+        outer.append(action_bar)
+        return outer
 
     def _build_main(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        # Toolbar
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         toolbar.set_margin_top(8)
         toolbar.set_margin_bottom(8)
         toolbar.set_margin_start(12)
         toolbar.set_margin_end(12)
 
-        # Search entry (top row)
-        self._search_entry = Gtk.SearchEntry(placeholder_text="Search tracks…", hexpand=True)
+        self._search_entry = Gtk.SearchEntry(placeholder_text="Search tracks...", hexpand=True)
         self._search_entry.connect("search-changed", self._on_search_changed)
         toolbar.append(self._search_entry)
 
-        # Action buttons (bottom row, spread)
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, homogeneous=True)
 
-        self._sync_btn = Gtk.Button(hexpand=True)
-        sync_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        sync_content.set_halign(Gtk.Align.CENTER)
-        sync_content.append(Gtk.Image(icon_name="view-refresh-symbolic"))
-        sync_content.append(Gtk.Label(label="Sync"))
-        self._sync_btn.set_child(sync_content)
-        self._sync_btn.add_css_class("suggested-action")
+        self._sync_btn = self._make_toolbar_btn("view-refresh-symbolic", "Sync", primary=True)
         self._sync_btn.connect("clicked", lambda _: self._on_sync_selected())
         btn_row.append(self._sync_btn)
 
-        sync_all_btn = Gtk.Button(hexpand=True)
-        sa_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        sa_content.set_halign(Gtk.Align.CENTER)
-        sa_content.append(Gtk.Image(icon_name="emblem-synchronizing-symbolic"))
-        sa_content.append(Gtk.Label(label="Sync all"))
-        sync_all_btn.set_child(sa_content)
+        sync_all_btn = self._make_toolbar_btn("emblem-synchronizing-symbolic", "Sync all")
         sync_all_btn.connect("clicked", lambda _: self._on_sync_all())
         btn_row.append(sync_all_btn)
 
-        open_btn = Gtk.Button(hexpand=True)
-        open_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        open_content.set_halign(Gtk.Align.CENTER)
-        open_content.append(Gtk.Image(icon_name="folder-open-symbolic"))
-        open_content.append(Gtk.Label(label="Open folder"))
-        open_btn.set_child(open_content)
+        open_btn = self._make_toolbar_btn("folder-open-symbolic", "Open folder")
         open_btn.connect("clicked", lambda _: self._on_open_folder())
         btn_row.append(open_btn)
 
-        rescan_btn = Gtk.Button(hexpand=True)
-        rescan_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        rescan_content.set_halign(Gtk.Align.CENTER)
-        rescan_content.append(Gtk.Image(icon_name="edit-find-symbolic"))
-        rescan_content.append(Gtk.Label(label="Rescan"))
-        rescan_btn.set_child(rescan_content)
+        rescan_btn = self._make_toolbar_btn("edit-find-symbolic", "Rescan")
         rescan_btn.connect("clicked", lambda _: self._on_rescan())
         btn_row.append(rescan_btn)
 
@@ -198,48 +256,65 @@ class YmdmWindow(Adw.ApplicationWindow):
         box.append(toolbar)
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # Track list header
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         header_row.set_margin_start(12)
         header_row.set_margin_end(12)
-        header_row.set_margin_top(4)
-        header_row.set_margin_bottom(4)
-        for text, expand, width in [("#", False, 32), ("Title", True, -1), ("Album", False, 160), ("", False, 40)]:
+        header_row.set_margin_top(5)
+        header_row.set_margin_bottom(5)
+
+        for text, expand, width in [
+            ("#",     False, 32),
+            ("TITLE", True,  -1),
+            ("ALBUM", False, 160),
+            ("",      False, 32),
+        ]:
             lbl = Gtk.Label(label=text, xalign=0)
-            lbl.add_css_class("dim-label")
+            lbl.add_css_class("track-header-label")
             lbl.set_size_request(width, -1)
             if expand:
                 lbl.set_hexpand(True)
             header_row.append(lbl)
+
         box.append(header_row)
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # Track list
         sw = Gtk.ScrolledWindow(vexpand=True)
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
         self._track_list = Gtk.ListBox()
         self._track_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._track_list.add_css_class("boxed-list-separate")
+        self._track_list.add_css_class("track-list")
+        self._track_list.set_show_separators(True)
         sw.set_child(self._track_list)
         box.append(sw)
 
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        statusbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        statusbar.add_css_class("statusbar")
 
-        # Status bar
-        self._status_label = Gtk.Label(label="Ready", xalign=0)
-        self._status_label.set_margin_start(12)
-        self._status_label.set_margin_end(12)
-        self._status_label.set_margin_top(6)
-        self._status_label.set_margin_bottom(6)
-        self._status_label.add_css_class("dim-label")
-        self._status_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
-        box.append(self._status_label)
+        self._status_label = Gtk.Label(label="Ready", xalign=0, hexpand=True)
+        self._status_label.add_css_class("statusbar-label")
+        self._status_label.set_ellipsize(3)
+        statusbar.append(self._status_label)
 
+        self._status_right = Gtk.Label(label="", xalign=1)
+        self._status_right.add_css_class("statusbar-label")
+        statusbar.append(self._status_right)
+
+        box.append(statusbar)
         return box
 
-    # ------------------------------------------------------------------
-    # Data / refresh
-    # ------------------------------------------------------------------
+    def _make_toolbar_btn(self, icon: str, label: str, primary: bool = False) -> Gtk.Button:
+        btn = Gtk.Button(hexpand=True)
+        if primary:
+            btn.add_css_class("suggested-action")
+        else:
+            btn.add_css_class("flat")
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        content.set_halign(Gtk.Align.CENTER)
+        content.append(Gtk.Image(icon_name=icon))
+        content.append(Gtk.Label(label=label))
+        btn.set_child(content)
+        return btn
 
     def _refresh_playlists(self):
         self.config = Config.load()
@@ -251,34 +326,39 @@ class YmdmWindow(Adw.ApplicationWindow):
             count = conn.execute(
                 "SELECT COUNT(*) FROM tracks WHERE playlist = ?", (pl.name,)
             ).fetchone()[0]
+
             row = Gtk.ListBoxRow()
             row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row_box.set_margin_top(6)
-            row_box.set_margin_bottom(6)
+            row_box.set_margin_top(5)
+            row_box.set_margin_bottom(5)
             row_box.set_margin_start(10)
             row_box.set_margin_end(10)
+
             icon = Gtk.Image(icon_name="audio-x-generic-symbolic")
+            icon.set_pixel_size(16)
             icon.add_css_class("dim-label")
             row_box.append(icon)
-            lbl = Gtk.Label(label=pl.name, xalign=0, hexpand=True)
-            row_box.append(lbl)
+
+            name_lbl = Gtk.Label(label=pl.name, xalign=0, hexpand=True)
+            name_lbl.add_css_class("playlist-name")
+            name_lbl.set_ellipsize(3)
+            row_box.append(name_lbl)
+
             count_lbl = Gtk.Label(label=str(count))
-            count_lbl.add_css_class("dim-label")
+            count_lbl.add_css_class("playlist-count")
             row_box.append(count_lbl)
+
             row.set_child(row_box)
             self._playlist_list.append(row)
 
-        if self.config.playlists:
+        has_playlists = bool(self.config.playlists)
+        if has_playlists:
             idx = min(self._selected_index, len(self.config.playlists) - 1)
             row = self._playlist_list.get_row_at_index(idx)
             if row:
                 self._playlist_list.select_row(row)
-            self._rename_btn.set_sensitive(True)
-            self._delete_btn.set_sensitive(True)
-        else:
-            self._rename_btn.set_sensitive(False)
-            self._delete_btn.set_sensitive(False)
-
+        self._rename_btn.set_sensitive(has_playlists)
+        self._delete_btn.set_sensitive(has_playlists)
         self._refresh_tracks()
 
     def _refresh_tracks(self):
@@ -290,6 +370,7 @@ class YmdmWindow(Adw.ApplicationWindow):
         idx = self._selected_index
         if idx >= len(self.config.playlists):
             return
+
         playlist = self.config.playlists[idx]
         query = self._search_entry.get_text().strip().lower() if hasattr(self, "_search_entry") else ""
 
@@ -301,95 +382,87 @@ class YmdmWindow(Adw.ApplicationWindow):
 
         if not tracks:
             row = Gtk.ListBoxRow()
-            row.set_child(Gtk.Label(label="No tracks downloaded yet — press Sync", margin_top=12, margin_bottom=12))
+            lbl = Gtk.Label(label="No tracks downloaded yet -- press Sync")
+            lbl.set_margin_top(16)
+            lbl.set_margin_bottom(16)
+            lbl.add_css_class("dim-label")
+            row.set_child(lbl)
             self._track_list.append(row)
+            self._update_statusbar(playlist.name, 0, 0)
             return
 
+        found_count = 0
         for i, track in enumerate(tracks, start=1):
             title = track["title"] or ""
+            exists = track["file_path"] and Path(track["file_path"]).exists()
+            if exists:
+                found_count += 1
             if query and query not in title.lower():
                 continue
-            exists = track["file_path"] and Path(track["file_path"]).exists()
 
             row = Gtk.ListBoxRow()
             row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row_box.set_margin_top(5)
-            row_box.set_margin_bottom(5)
+            row_box.set_margin_top(6)
+            row_box.set_margin_bottom(6)
             row_box.set_margin_start(12)
             row_box.set_margin_end(12)
             if not exists:
                 row_box.add_css_class("track-missing")
 
             num_lbl = Gtk.Label(label=str(i), xalign=1)
-            num_lbl.add_css_class("dim-label")
+            num_lbl.add_css_class("track-num")
             num_lbl.set_size_request(28, -1)
             row_box.append(num_lbl)
 
             text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+            text_box.set_valign(Gtk.Align.CENTER)
+
             title_lbl = Gtk.Label(label=title, xalign=0)
             title_lbl.add_css_class("track-title")
             title_lbl.set_ellipsize(3)
             text_box.append(title_lbl)
-            if track["artist"]:
-                artist_lbl = Gtk.Label(label=track["artist"], xalign=0)
-                artist_lbl.add_css_class("track-artist")
-                artist_lbl.add_css_class("dim-label")
-                artist_lbl.set_ellipsize(3)
-                text_box.append(artist_lbl)
+
+
             row_box.append(text_box)
 
             album_lbl = Gtk.Label(label=track["album"] or "", xalign=0)
-            album_lbl.add_css_class("dim-label")
+            album_lbl.add_css_class("track-album")
             album_lbl.set_size_request(150, -1)
             album_lbl.set_ellipsize(3)
             row_box.append(album_lbl)
 
-            status_icon = Gtk.Image(icon_name="emblem-ok-symbolic" if exists else "dialog-error-symbolic")
             if exists:
+                status_icon = Gtk.Image(icon_name="emblem-ok-symbolic")
                 status_icon.add_css_class("status-ok")
             else:
+                status_icon = Gtk.Image(icon_name="dialog-warning-symbolic")
                 status_icon.add_css_class("status-missing")
+            status_icon.set_pixel_size(14)
             row_box.append(status_icon)
 
             row.set_child(row_box)
             self._track_list.append(row)
 
+        self._update_statusbar(playlist.name, found_count, len(tracks))
+
+    def _update_statusbar(self, name: str, found: int, total: int):
+        self._status_label.set_label(f"{name}  --  {found} of {total} tracks downloaded")
+        if total > 0 and found < total:
+            self._status_right.set_label(f"{total - found} missing")
+        else:
+            self._status_right.set_label("")
+
     def _set_status(self, msg: str):
         GLib.idle_add(self._status_label.set_label, msg)
-
-    # ------------------------------------------------------------------
-    # Playlist selection
-    # ------------------------------------------------------------------
 
     def _on_playlist_selected(self, listbox, row):
         if row is None:
             return
         self._selected_index = row.get_index()
         self._refresh_tracks()
-        self._update_statusbar()
-
-    def _update_statusbar(self):
-        if not self.config.playlists or self._selected_index >= len(self.config.playlists):
-            return
-        pl = self.config.playlists[self._selected_index]
-        conn = get_connection()
-        tracks = conn.execute(
-            "SELECT file_path FROM tracks WHERE playlist = ?", (pl.name,)
-        ).fetchall()
-        total = len(tracks)
-        found = sum(1 for t in tracks if t["file_path"] and Path(t["file_path"]).exists())
-        self._set_status(f"{pl.name} — {found}/{total} tracks downloaded")
-
-    # ------------------------------------------------------------------
-    # Search
-    # ------------------------------------------------------------------
 
     def _on_search_changed(self, entry):
         self._refresh_tracks()
-
-    # ------------------------------------------------------------------
-    # Sync
-    # ------------------------------------------------------------------
 
     def _on_sync_selected(self):
         if not self.config.playlists:
@@ -399,7 +472,7 @@ class YmdmWindow(Adw.ApplicationWindow):
             return
         pl = self.config.playlists[idx]
         self._sync_btn.set_sensitive(False)
-        self._set_status(f"Syncing {pl.name}…")
+        self._set_status(f"Syncing {pl.name}...")
 
         def run():
             cfg = Config.load()
@@ -409,13 +482,13 @@ class YmdmWindow(Adw.ApplicationWindow):
         threading.Thread(target=run, daemon=True).start()
 
     def _on_sync_all(self):
-        self._set_status("Syncing all playlists…")
+        self._set_status("Syncing all playlists...")
 
         def run():
             cfg = Config.load()
             all_errors = []
             for pl in cfg.playlists:
-                self._set_status(f"Syncing {pl.name}…")
+                self._set_status(f"Syncing {pl.name}...")
                 errors = sync_playlist(pl, cfg, progress_cb=lambda msg: self._set_status(msg.strip()))
                 all_errors.extend(errors)
             GLib.idle_add(self._after_sync_all, all_errors)
@@ -426,20 +499,16 @@ class YmdmWindow(Adw.ApplicationWindow):
         self._sync_btn.set_sensitive(True)
         self._refresh_playlists()
         if errors:
-            self._set_status(f"⚠ {name} — {len(errors)} error(s), see errors.log")
+            self._set_status(f"{name} -- {len(errors)} error(s), see errors.log")
         else:
-            self._set_status(f"✓ {name} synced")
+            self._set_status(f"Synced: {name}")
 
     def _after_sync_all(self, errors: list):
         self._refresh_playlists()
         if errors:
-            self._set_status(f"⚠ Sync complete — {len(errors)} error(s), see errors.log")
+            self._set_status(f"Sync complete -- {len(errors)} error(s), see errors.log")
         else:
-            self._set_status("✓ All playlists synced")
-
-    # ------------------------------------------------------------------
-    # Open folder
-    # ------------------------------------------------------------------
+            self._set_status("All playlists synced")
 
     def _on_open_folder(self):
         if not self.config.playlists:
@@ -450,11 +519,7 @@ class YmdmWindow(Adw.ApplicationWindow):
             import subprocess
             subprocess.Popen(["xdg-open", str(music_dir)])
         else:
-            self._set_status(f"Folder not found: {music_dir} — sync first")
-
-    # ------------------------------------------------------------------
-    # Rescan
-    # ------------------------------------------------------------------
+            self._set_status(f"Folder not found: {music_dir} -- sync first")
 
     def _on_rescan(self):
         from ..modules.state import import_existing_files
@@ -467,16 +532,13 @@ class YmdmWindow(Adw.ApplicationWindow):
             parts.append(f"{imported} file(s) imported")
         if cleaned:
             parts.append(f"{cleaned} missing track(s) removed")
-        self._set_status("Rescan complete — " + ", ".join(parts) if parts else "Rescan complete — everything looks good")
-
-    # ------------------------------------------------------------------
-    # Add / rename / delete playlist
-    # ------------------------------------------------------------------
+        self._set_status(
+            "Rescan complete -- " + ", ".join(parts) if parts else "Rescan complete -- everything looks good"
+        )
 
     def _on_add_playlist(self):
         from ..modules.utils import sanitize_youtube_url
         from ..modules.config import CONFIG_PATH
-
         dialog = AddPlaylistDialog(self)
         dialog.connect("close-request", lambda d: self._handle_add(d, sanitize_youtube_url, CONFIG_PATH))
         dialog.present()
@@ -586,10 +648,6 @@ class YmdmWindow(Adw.ApplicationWindow):
         self._refresh_playlists()
         return False
 
-    # ------------------------------------------------------------------
-    # Auth
-    # ------------------------------------------------------------------
-
     def _on_auth(self):
         current = self.config.auth.browser if self.config.auth.enabled else None
         dialog = AuthDialog(self, current)
@@ -618,12 +676,8 @@ class YmdmWindow(Adw.ApplicationWindow):
         new_content += f'\n\n[auth]\nenabled = true\nbrowser = "{browser}"\n'
         config_path.write_text(new_content)
         self.config = Config.load()
-        self._set_status(f"⚠ Auth enabled using {browser} cookies — may trigger Google security alerts.")
+        self._set_status(f"Auth enabled using {browser} cookies -- may trigger Google security alerts.")
         return False
-
-    # ------------------------------------------------------------------
-    # Set directory
-    # ------------------------------------------------------------------
 
     def _on_set_dir(self):
         dialog = Gtk.FileDialog(title="Select download directory")
@@ -654,10 +708,6 @@ class YmdmWindow(Adw.ApplicationWindow):
             self._set_status(f"Download directory set to: {new_path} ({updated} paths updated)")
         except Exception:
             pass
-
-    # ------------------------------------------------------------------
-    # About
-    # ------------------------------------------------------------------
 
     def _on_about(self):
         about = Adw.AboutWindow(

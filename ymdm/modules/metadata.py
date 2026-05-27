@@ -21,3 +21,22 @@ def embed_metadata(file_path: Path, title: str, artist: str | None,
         with open(thumbnail_path, "rb") as img:
             tags["APIC"] = APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=img.read())
     tags.save(file_path)
+
+
+def embed_tags(file_path: "Path", title: str, artist: "str | None",
+               album: "str | None", track_number: "int | None"):
+    """Embed ID3 tags (no thumbnail) into an MP3 file."""
+    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK
+    from mutagen.id3 import ID3NoHeaderError
+    try:
+        tags = ID3(file_path)
+    except ID3NoHeaderError:
+        tags = ID3()
+    tags["TIT2"] = TIT2(encoding=3, text=title)
+    if artist:
+        tags["TPE1"] = TPE1(encoding=3, text=artist)
+    if album:
+        tags["TALB"] = TALB(encoding=3, text=album)
+    if track_number:
+        tags["TRCK"] = TRCK(encoding=3, text=str(track_number))
+    tags.save(file_path)
