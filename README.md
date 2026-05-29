@@ -18,16 +18,19 @@ ymdm is an easy way to download your favorite music from YouTube and YouTube Mus
 
 ## Install
 
+Run the installer — it will ask which version you want and handle everything:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/saka-p/ymdm/main/install.sh | bash
 ```
 
-Or manually:
+Or install manually:
 
 ```bash
-pip install "ymdm[full]"   # CLI + TUI + GTK
-pip install "ymdm[tui]"    # CLI + TUI
-pip install ymdm            # CLI only
+pip install "ymdm[full]"      # CLI + TUI + GTK
+pip install "ymdm[tui]"       # CLI + TUI
+pip install "ymdm[desktop]"   # CLI + GTK
+pip install ymdm               # CLI only
 ```
 
 ## CLI Usage
