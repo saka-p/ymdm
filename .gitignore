@@ -8,3 +8,5 @@ build/
 .venv/
 venv/
 *.db
+config.toml
+ymdm.egg-info/
