@@ -9,20 +9,19 @@ description = "YouTube Music Download Manager"
 requires-python = ">=3.10"
 dependencies = [
     "yt-dlp",
-    "ytmusicapi",
     "mutagen",
-    "rich",
-    "textual",
     "click",
 ]
 
+[project.optional-dependencies]
+tui     = ["textual>=0.70.0"]
+desktop = ["pygobject>=3.48.0"]
+full    = ["textual>=0.70.0", "pygobject>=3.48.0"]
+
 [project.scripts]
+ymdm     = "ymdm.cli:main"
 ymdm-gtk = "ymdm.gtk.main:run"
-ymdm = "ymdm.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
 include = ["ymdm*"]
-
-[project.optional-dependencies]
-desktop = ["pygobject>=3.48.0"]
