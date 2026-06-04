@@ -356,6 +356,49 @@ def tui():
 
 
 @main.command()
+def update():
+    """Update ymdm to the latest version."""
+    import subprocess
+    from pathlib import Path
+
+    repo_dir = Path.home() / ".local" / "share" / "ymdm"
+
+    if not repo_dir.exists():
+        click.echo("Could not find ymdm install at ~/.local/share/ymdm.")
+        click.echo("If you installed manually with pip, run: pip install --upgrade ymdm")
+        return
+
+    click.echo("Updating ymdm...")
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "pull", "--ff-only"],
+        capture_output=True, text=True
+    )
+
+    if result.returncode != 0:
+        click.echo(f"Git pull failed: {result.stderr.strip()}")
+        return
+
+    if "Already up to date" in result.stdout:
+        click.echo("Already up to date.")
+        return
+
+    click.echo("  ✓ Downloaded latest changes")
+
+    result = subprocess.run(
+        ["pip", "install", "--break-system-packages", "-e", str(repo_dir)],
+        capture_output=True, text=True
+    )
+
+    if result.returncode != 0:
+        click.echo(f"pip install failed: {result.stderr.strip()}")
+        return
+
+    click.echo("  ✓ Installed")
+    click.echo("ymdm is up to date.")
+
+
+@main.command()
 def uninstall():
     """Uninstall ymdm from this system.
 
