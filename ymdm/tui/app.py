@@ -410,6 +410,8 @@ class YmdmApp(App):
         self.register_theme(BREEZE_DARK_THEME)
 
     def on_mount(self) -> None:
+        from pathlib import Path
+        Path.home().joinpath(".config", "ymdm").mkdir(parents=True, exist_ok=True)
         saved_theme = self._settings.get("theme", "textual-dark")
         try:
             self.theme = saved_theme
