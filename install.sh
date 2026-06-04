@@ -173,7 +173,7 @@ if [[ "$EXTRA" == "[desktop]" || "$EXTRA" == "[full]" ]]; then
     mkdir -p "$DESKTOP_DIR"
     YMDM_GTK_BIN="$(command -v ymdm-gtk 2>/dev/null || echo "$HOME/.local/bin/ymdm-gtk")"
     sed "s|Exec=ymdm-gtk|Exec=$YMDM_GTK_BIN|" \
-        "$INSTALL_DIR/ymdm.desktop" > "$DESKTOP_DIR/ymdm.desktop"
+        "$INSTALL_DIR/io.github.saka_p.ymdm.desktop" > "$DESKTOP_DIR/io.github.saka_p.ymdm.desktop"
     if command -v update-desktop-database &>/dev/null; then
         update-desktop-database "$DESKTOP_DIR"
     fi
