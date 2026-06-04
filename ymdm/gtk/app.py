@@ -129,6 +129,12 @@ class YmdmWindow(Adw.ApplicationWindow):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
+        # Ensure config directory and file exist on first launch
+        from ..modules.config import CONFIG_DIR, CONFIG_PATH
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        if not CONFIG_PATH.exists():
+            CONFIG_PATH.write_text("")
+
         self.config = Config.load()
         self._selected_index = 0
         self._build_ui()
