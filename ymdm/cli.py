@@ -353,3 +353,69 @@ def tui():
     """Launch the TUI interface."""
     from .tui.app import run
     run()
+
+
+@main.command()
+def uninstall():
+    """Uninstall ymdm from this system.
+
+    Removes the ymdm package, cloned repo, and app launcher entry.
+    Your music files and config are kept by default.
+    """
+    import subprocess
+    from pathlib import Path
+
+    click.echo("This will uninstall ymdm from your system.")
+    click.echo("Your music files will NOT be deleted.")
+    click.echo("")
+
+    remove_config = click.confirm(
+        "Also remove config and download history (~/.config/ymdm)?",
+        default=False
+    )
+
+    if not click.confirm("Continue with uninstall?", default=False):
+        click.echo("Uninstall cancelled.")
+        return
+
+    # Remove pip package
+    click.echo("Removing ymdm package...")
+    subprocess.run(
+        ["pip", "uninstall", "ymdm", "-y", "--break-system-packages"],
+        capture_output=True
+    )
+    click.echo("  ✓ pip package removed")
+
+    # Remove cloned repo
+    repo_dir = Path.home() / ".local" / "share" / "ymdm"
+    if repo_dir.exists():
+        import shutil
+        shutil.rmtree(repo_dir)
+        click.echo("  ✓ Removed ~/.local/share/ymdm")
+
+    # Remove .desktop file
+    desktop = Path.home() / ".local" / "share" / "applications" / "ymdm.desktop"
+    if desktop.exists():
+        desktop.unlink()
+        click.echo("  ✓ Removed app launcher entry")
+        try:
+            subprocess.run(
+                ["update-desktop-database",
+                 str(Path.home() / ".local" / "share" / "applications")],
+                capture_output=True
+            )
+        except Exception:
+            pass
+
+    # Optionally remove config
+    if remove_config:
+        config_dir = Path.home() / ".config" / "ymdm"
+        if config_dir.exists():
+            import shutil
+            shutil.rmtree(config_dir)
+            click.echo("  ✓ Removed ~/.config/ymdm")
+
+    click.echo("")
+    click.echo("ymdm has been uninstalled.")
+    if not remove_config:
+        click.echo("Your config is still at ~/.config/ymdm if you want to remove it manually.")
