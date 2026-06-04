@@ -719,7 +719,7 @@ class YmdmWindow(Adw.ApplicationWindow):
         about = Adw.AboutWindow(
             transient_for=self,
             application_name="ymdm",
-            application_icon="audio-x-generic",
+            application_icon="ymdm",
             version="0.1.0",
             comments="YouTube Music Download Manager",
             license_type=Gtk.License.MIT_X11,

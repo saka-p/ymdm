@@ -156,6 +156,17 @@ pip install --break-system-packages -e "$INSTALL_DIR$EXTRA"
 echo "  ✓ ymdm installed"
 echo ""
 
+# ── Install icon ─────────────────────────────────────────────────────────────
+echo "► Installing icon..."
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+mkdir -p "$ICON_DIR"
+cp "$INSTALL_DIR/assets/ymdm.png" "$ICON_DIR/ymdm.png"
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+fi
+echo "  ✓ Icon installed"
+echo ""
+
 # ── Install .desktop file if GTK ─────────────────────────────────────────────
 if [[ "$EXTRA" == "[desktop]" || "$EXTRA" == "[full]" ]]; then
     echo "► Installing app launcher entry..."
