@@ -158,12 +158,26 @@ echo ""
 
 # ── Install icon ─────────────────────────────────────────────────────────────
 echo "► Installing icon..."
+
+# Install to hicolor theme (KDE, GNOME)
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
 mkdir -p "$ICON_DIR"
 cp "$INSTALL_DIR/assets/ymdm.png" "$ICON_DIR/ymdm.png"
+
+# Also install flat copy for Hyprland/Walker/rofi/wofi
+cp "$INSTALL_DIR/assets/ymdm.png" "$HOME/.local/share/icons/ymdm.png"
+
+# Update icon cache if available
 if command -v gtk-update-icon-cache &>/dev/null; then
-    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" --ignore-theme-index 2>/dev/null || true
 fi
+
+# Update desktop database
+mkdir -p "$HOME/.local/share/applications"
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+fi
+
 echo "  ✓ Icon installed"
 echo ""
 
