@@ -41,12 +41,18 @@ All commands below are for the terminal. For a visual interface, run `ymdm tui` 
 
 ```bash
 ymdm add "My Playlist" "https://music.youtube.com/playlist?list=..."
-ymdm sync                  # sync all playlists
-ymdm sync "My Playlist"    # sync one playlist
-ymdm list                  # list configured playlists
-ymdm remove "My Playlist"  # remove a playlist
-ymdm tui                   # launch TUI
-ymdm-gtk                   # launch desktop app
+ymdm sync                           # sync all playlists
+ymdm sync "My Playlist"             # sync one playlist
+ymdm list                           # list configured playlists
+ymdm rename "Old Name" "New Name"   # rename a playlist
+ymdm remove "My Playlist"           # remove from config (keep files)
+ymdm remove "My Playlist" --delete-files  # remove and delete music files
+ymdm set-dir ~/Music/ymdm           # change download directory
+ymdm rescan                         # import existing files into history
+ymdm update                         # update ymdm to latest version
+ymdm uninstall                      # uninstall ymdm
+ymdm tui                            # launch TUI
+ymdm-gtk                            # launch desktop app
 ```
 
 ## Private Playlists
