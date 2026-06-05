@@ -1,5 +1,7 @@
 # ymdm — YouTube Music Download Manager
 
+> ⚠️ **Beta** — ymdm is functional but still in early development. Expect rough edges.
+
 ymdm is an easy way to download your favorite music from YouTube and YouTube Music so you can listen to it locally. Whether you want to own your music offline or keep a local copy of your YouTube Music library in sync, ymdm handles it automatically.
 
 ## Features
