@@ -6,7 +6,8 @@ INSTALL_DIR="$HOME/.local/share/ymdm"
 DESKTOP_DIR="$HOME/.local/share/applications"
 
 # ── Self-update: re-run from repo if this script is not already running from there ──
-if [[ "${BASH_SOURCE[0]}" != "$INSTALL_DIR/install.sh" ]]; then
+CURRENT_SCRIPT="${BASH_SOURCE[0]:-}"
+if [[ "$CURRENT_SCRIPT" != "$INSTALL_DIR/install.sh" ]]; then
     # Clone or update repo first
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         git -C "$INSTALL_DIR" pull --ff-only -q
