@@ -23,7 +23,7 @@ ymdm is an easy way to download your favorite music from YouTube and YouTube Mus
 Run the installer — it will ask which version you want and handle everything:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/saka-p/ymdm/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/saka-p/ymdm/main/install.sh > /tmp/ymdm-install.sh && bash /tmp/ymdm-install.sh
 ```
 
 Or install manually:
