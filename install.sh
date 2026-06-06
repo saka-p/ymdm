@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="git@github.com:saka-p/ymdm.git"
+REPO_URL="https://github.com/saka-p/ymdm.git"
 INSTALL_DIR="$HOME/.local/share/ymdm"
 DESKTOP_DIR="$HOME/.local/share/applications"
 
