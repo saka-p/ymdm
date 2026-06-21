@@ -81,6 +81,19 @@ def sync_playlist(
         "remote_components": {"ejs": {"source": "github"}},
     }
 
+    if config.metadata.crop_thumbnail:
+        # Crop YouTube's padded rectangular thumbnail to a clean square,
+        # removing the solid-color bars on the sides, before embedding.
+        ydl_opts["postprocessor_args"] = {
+            "thumbnailsconvertor": [
+                "-vf", "crop=ih:ih"
+            ]
+        }
+        ydl_opts["postprocessors"].insert(-1, {
+            "key": "FFmpegThumbnailsConvertor",
+            "format": "jpg",
+        })
+
     if not dev:
         ydl_opts["logger"] = _YdlLogger(playlist.name)
         ydl_opts["ignoreerrors"] = True

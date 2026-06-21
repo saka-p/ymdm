@@ -15,6 +15,7 @@ class MetadataConfig:
     embed_album: bool = True
     embed_track_number: bool = True
     thumbnail_dir: str | None = None
+    crop_thumbnail: bool = True  # Crop YouTube's padded thumbnail to a clean square
 
 
 @dataclass
@@ -68,6 +69,7 @@ class Config:
             cfg.metadata.embed_album = m.get("embed_album", True)
             cfg.metadata.embed_track_number = m.get("embed_track_number", True)
             cfg.metadata.thumbnail_dir = m.get("thumbnail_dir", None)
+            cfg.metadata.crop_thumbnail = m.get("crop_thumbnail", True)
         if a := raw.get("auth"):
             cfg.auth.enabled = a.get("enabled", False)
             cfg.auth.browser = a.get("browser", None)
