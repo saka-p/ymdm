@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Callable
-from .config import Config, PlaylistEntry
+from .config import Config, PlaylistEntry, get_effective_metadata
 from .state import get_connection, is_downloaded, mark_downloaded
 from .metadata import embed_tags
 from .auth import get_ydl_cookie_opts
@@ -59,6 +59,7 @@ def sync_playlist(
     conn = get_connection()
     output_dir = config.general.music_dir / playlist.name
     output_dir.mkdir(parents=True, exist_ok=True)
+    meta = get_effective_metadata(playlist, config)
 
     ydl_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
@@ -74,14 +75,14 @@ def sync_playlist(
             },
         ],
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
-        "writethumbnail": config.metadata.embed_thumbnail,
+        "writethumbnail": meta.embed_thumbnail,
         "quiet": not dev,
         "no_warnings": not dev,
         "js_runtimes": {"node": {}},
         "remote_components": {"ejs": {"source": "github"}},
     }
 
-    if config.metadata.crop_thumbnail:
+    if meta.crop_thumbnail:
         # Crop YouTube's padded rectangular thumbnail to a clean square,
         # removing the solid-color bars on the sides, before embedding.
         ydl_opts["postprocessor_args"] = {

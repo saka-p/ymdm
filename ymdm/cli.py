@@ -348,6 +348,125 @@ def _pick_browser() -> str:
         click.echo("Invalid choice, try again.")
 
 
+@main.command(name="config-playlist")
+@click.argument("name")
+@click.option("--crop-thumbnail", type=bool, default=None,
+              help="Crop YouTube's padded thumbnail to a clean square for this playlist only.")
+@click.option("--embed-thumbnail", type=bool, default=None,
+              help="Embed thumbnail art for this playlist only.")
+@click.option("--embed-artist", type=bool, default=None,
+              help="Embed artist tag for this playlist only.")
+@click.option("--embed-album", type=bool, default=None,
+              help="Embed album tag for this playlist only.")
+@click.option("--embed-track-number", type=bool, default=None,
+              help="Embed track number tag for this playlist only.")
+@click.option("--show", is_flag=True, default=False,
+              help="Show the effective metadata settings for this playlist.")
+@click.option("--reset", is_flag=True, default=False,
+              help="Remove all per-playlist overrides, reverting to global defaults.")
+def config_playlist(name, crop_thumbnail, embed_thumbnail, embed_artist,
+                     embed_album, embed_track_number, show, reset):
+    """View or set per-playlist metadata overrides.
+
+    Without flags, shows current overrides. Pass one or more flags to set them.
+    Use --show to see the effective (merged) settings. Use --reset to clear overrides.
+    """
+    import tomllib
+    from .modules.config import get_effective_metadata
+
+    config = Config.load()
+    matches = [pl for pl in config.playlists if pl.name == name]
+    if not matches:
+        click.echo(f"No playlist named '{name}' found. Use 'ymdm list' to see configured playlists.")
+        return
+    playlist = matches[0]
+
+    if show:
+        eff = get_effective_metadata(playlist, config)
+        click.echo(f"Effective metadata settings for '{name}':")
+        click.echo(f"  embed_thumbnail:     {eff.embed_thumbnail}")
+        click.echo(f"  embed_artist:        {eff.embed_artist}")
+        click.echo(f"  embed_album:         {eff.embed_album}")
+        click.echo(f"  embed_track_number:  {eff.embed_track_number}")
+        click.echo(f"  crop_thumbnail:      {eff.crop_thumbnail}")
+        return
+
+    config_path = CONFIG_PATH
+    content = config_path.read_text()
+    doc = tomllib.loads(content)
+
+    if reset:
+        playlist.metadata_overrides = {}
+    else:
+        new_overrides = dict(playlist.metadata_overrides)
+        if crop_thumbnail is not None:
+            new_overrides["crop_thumbnail"] = crop_thumbnail
+        if embed_thumbnail is not None:
+            new_overrides["embed_thumbnail"] = embed_thumbnail
+        if embed_artist is not None:
+            new_overrides["embed_artist"] = embed_artist
+        if embed_album is not None:
+            new_overrides["embed_album"] = embed_album
+        if embed_track_number is not None:
+            new_overrides["embed_track_number"] = embed_track_number
+
+        if not new_overrides:
+            click.echo("No settings provided. Use --show to view current settings, or pass a flag to set one.")
+            return
+        playlist.metadata_overrides = new_overrides
+
+    # Rewrite the config file's [[playlists.watched]] entries to include
+    # the metadata table for this playlist, preserving everything else.
+    lines = content.splitlines(keepends=True)
+    output_lines = []
+    in_target_playlist = False
+    skip_existing_metadata_block = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if stripped == "[[playlists.watched]]":
+            # Look ahead to see if this block is for our target playlist
+            block_lines = [line]
+            j = i + 1
+            is_target = False
+            while j < len(lines) and not lines[j].strip().startswith("[["):
+                if f'name = "{name}"' in lines[j]:
+                    is_target = True
+                if lines[j].strip().startswith("[playlists.watched.metadata]"):
+                    # skip this nested table and its key=value lines
+                    j += 1
+                    while j < len(lines) and "=" in lines[j] and not lines[j].strip().startswith("["):
+                        j += 1
+                    continue
+                block_lines.append(lines[j])
+                j += 1
+
+            output_lines.extend(block_lines)
+            if is_target:
+                # Append fresh metadata overrides block if any exist
+                if playlist.metadata_overrides:
+                    output_lines.append("\n[playlists.watched.metadata]\n")
+                    for k, v in playlist.metadata_overrides.items():
+                        val = "true" if v is True else "false" if v is False else f'"{v}"'
+                        output_lines.append(f"{k} = {val}\n")
+            i = j
+            continue
+
+        output_lines.append(line)
+        i += 1
+
+    config_path.write_text("".join(output_lines))
+
+    if reset:
+        click.echo(f"Reset all metadata overrides for '{name}'.")
+    else:
+        click.echo(f"Updated metadata overrides for '{name}':")
+        for k, v in playlist.metadata_overrides.items():
+            click.echo(f"  {k} = {v}")
+
+
 @main.command()
 def tui():
     """Launch the TUI interface."""

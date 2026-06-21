@@ -41,6 +41,7 @@ class DevConfig:
 class PlaylistEntry:
     name: str
     url: str
+    metadata_overrides: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -76,9 +77,31 @@ class Config:
         if d := raw.get("dev"):
             cfg.dev.enabled = d.get("enabled", False)
         if pl := raw.get("playlists", {}).get("watched"):
-            cfg.playlists = [PlaylistEntry(p["name"], p["url"]) for p in pl]
+            cfg.playlists = [
+                PlaylistEntry(
+                    p["name"],
+                    p["url"],
+                    metadata_overrides=p.get("metadata", {}),
+                )
+                for p in pl
+            ]
         return cfg
 
     def ensure_dirs(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         self.general.music_dir.mkdir(parents=True, exist_ok=True)
+
+
+def get_effective_metadata(playlist: PlaylistEntry, config: "Config") -> MetadataConfig:
+    """Return a MetadataConfig for this playlist, with any per-playlist
+    overrides applied on top of the global metadata settings.
+    """
+    overrides = playlist.metadata_overrides or {}
+    return MetadataConfig(
+        embed_thumbnail=overrides.get("embed_thumbnail", config.metadata.embed_thumbnail),
+        embed_artist=overrides.get("embed_artist", config.metadata.embed_artist),
+        embed_album=overrides.get("embed_album", config.metadata.embed_album),
+        embed_track_number=overrides.get("embed_track_number", config.metadata.embed_track_number),
+        thumbnail_dir=overrides.get("thumbnail_dir", config.metadata.thumbnail_dir),
+        crop_thumbnail=overrides.get("crop_thumbnail", config.metadata.crop_thumbnail),
+    )
