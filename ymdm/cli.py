@@ -474,6 +474,43 @@ def tui():
     run()
 
 
+def _ensure_node_runtime():
+    """Ensure a JS runtime (Node.js) is available for yt-dlp's EJS solver.
+
+    yt-dlp (2025.11+) needs an external JavaScript runtime to download from
+    YouTube. Without it, downloads fail with missing formats. Called on update
+    so the dependency can't silently go missing.
+    """
+    import shutil, subprocess, click
+    if shutil.which("node"):
+        return
+    click.echo("  Node.js not found — required by yt-dlp to download from YouTube.")
+    pkg = None
+    for cand, name in (("dnf", "nodejs"), ("apt", "nodejs"), ("pacman", "nodejs")):
+        if shutil.which(cand):
+            pkg = (cand, name)
+            break
+    if not pkg:
+        click.echo("  No supported package manager (dnf/apt/pacman); install Node.js manually.")
+        return
+    if not click.confirm("  Install Node.js now?", default=True):
+        click.echo("  ⚠ Skipped — YouTube downloads will fail until Node.js is installed.")
+        return
+    mgr, name = pkg
+    cmd = {
+        "dnf":    ["sudo", "dnf", "install", "-y", name],
+        "apt":    ["sudo", "apt", "install", "-y", name],
+        "pacman": ["sudo", "pacman", "-S", "--needed", "--noconfirm", name],
+    }[mgr]
+    subprocess.run(cmd)
+    if shutil.which("node"):
+        click.echo("  ✓ Node.js installed")
+    elif shutil.which("nodejs"):
+        click.echo("  ⚠ 'nodejs' installed but 'node' not in PATH; yt-dlp needs 'node'.")
+    else:
+        click.echo("  ✗ Node.js install did not succeed.")
+
+
 @main.command()
 def update():
     """Update ymdm to the latest version."""
@@ -486,6 +523,11 @@ def update():
         click.echo("Could not find ymdm install at ~/.local/share/ymdm.")
         click.echo("If you installed manually with pip, run: pip install --upgrade ymdm")
         return
+
+    _ensure_node_runtime()
+
+    click.echo("Refreshing yt-dlp...")
+    subprocess.run(["pip", "install", "--upgrade", "--break-system-packages", "yt-dlp"])
 
     click.echo("Updating ymdm...")
 

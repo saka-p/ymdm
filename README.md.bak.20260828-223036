@@ -17,7 +17,6 @@ ymdm is an easy way to download your favorite music from YouTube and YouTube Mus
 - Linux
 - Python 3.10+
 - ffmpeg
-- Node.js (JavaScript runtime required by yt-dlp for YouTube)
 
 ## Install
 

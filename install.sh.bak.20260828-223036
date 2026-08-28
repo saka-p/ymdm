@@ -89,25 +89,6 @@ else
     fi
 fi
 
-# ── Node.js (yt-dlp JS runtime for YouTube EJS) ──────────────────────────────
-# Required by yt-dlp (2025.11+) to solve YouTube's JS challenges.
-if command -v node &>/dev/null; then
-    echo "  ✓ Node.js $(node --version 2>/dev/null)"
-else
-    echo "  Node.js not found (needed by yt-dlp to download from YouTube)."
-    read -rp "  Install it now? [y/N] " yn
-    if [[ "$yn" =~ ^[Yy]$ ]]; then
-        _install_pkg nodejs
-        if ! command -v node &>/dev/null && command -v nodejs &>/dev/null; then
-            echo "  ⚠ 'nodejs' installed but 'node' is not in PATH."
-            echo "    yt-dlp looks for 'node'; you may need:"
-            echo "      sudo ln -s \"$(command -v nodejs)\" /usr/local/bin/node"
-        fi
-    else
-        echo "  ⚠ Skipped — YouTube downloads will fail until Node.js is installed."
-    fi
-fi
-
 # pip — package name differs per distro
 if command -v pip &>/dev/null || command -v pip3 &>/dev/null; then
     echo "  ✓ pip"

@@ -79,7 +79,7 @@ def sync_playlist(
         "quiet": not dev,
         "no_warnings": not dev,
         "js_runtimes": {"node": {}},
-        "remote_components": {"ejs": {"source": "github"}},
+        "remote_components": {"ejs:github"},
     }
 
     if meta.crop_thumbnail:
@@ -214,6 +214,18 @@ def sync_playlist(
     summary = f"  Done — {downloaded} downloaded, {skipped} skipped"
     if errors:
         summary += f", {errors} error(s) — see ~/.config/ymdm/errors.log"
+
+    if logger:
+        forbidden = sum(
+            1 for e in logger.errors
+            if "403" in e or "unable to download video data" in e
+        )
+        if forbidden >= max(3, total // 3):
+            summary += (
+                "\n  ⚠ Many downloads were blocked (HTTP 403) — this almost always "
+                "means yt-dlp is out of date."
+                "\n     Fix: ymdm update   (or: pip install -U yt-dlp)"
+            )
     _status(summary)
 
     return logger.errors if logger else []
